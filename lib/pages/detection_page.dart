@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:adjust_app/widgets/custom_scrollbar.dart';
 import '../widgets/navigation_bar.dart';
 
@@ -108,10 +109,9 @@ class DetectionPage extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            child: const Text(
+                            child: Text(
                               'DETECT',
-                              style: TextStyle(
-                                fontFamily: 'Poppins',
+                              style: GoogleFonts.poppins(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: 1.2,
@@ -243,11 +243,10 @@ class _PercentageIndicator extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 2),
       child: Text(
         '$percentage% $label', // Percentage beside the text
-        style: TextStyle(
+        style: GoogleFonts.poppins(
           fontSize: 13,
           fontWeight: FontWeight.w600,
           color: color,
-          fontFamily: 'Poppins',
         ),
       ),
     );
@@ -288,10 +287,10 @@ class _CodedWordList extends StatelessWidget {
         children: [
           Text(
             title,
-            style: const TextStyle(
+            style: GoogleFonts.poppins(
               fontWeight: FontWeight.w600, 
               fontSize: 12,
-              color: Color(0xFFA984AE),
+              color: const Color(0xFFA984AE),
             ),
           ),
           const SizedBox(height: 12),
