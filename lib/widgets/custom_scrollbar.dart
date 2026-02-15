@@ -74,9 +74,7 @@ class _CustomScrollbarState extends State<CustomScrollbar> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // TRACK (FULL HEIGHT)
-  // ─────────────────────────────────────────────
+
   Widget _buildTrack() {
     return Positioned(
       top: 0,
@@ -92,9 +90,7 @@ class _CustomScrollbarState extends State<CustomScrollbar> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // SCROLLBAR THUMB
-  // ─────────────────────────────────────────────
+
   Widget _buildScrollbar() {
     return RawScrollbar(
       controller: _scrollController,
@@ -116,9 +112,7 @@ class _CustomScrollbarState extends State<CustomScrollbar> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // FLOATING ARROWS (OVERLAY)
-  // ─────────────────────────────────────────────
+
   Widget _buildArrow({required bool isUp}) {
     return Positioned(
       top: isUp ? 0.1 : null,
@@ -136,9 +130,7 @@ class _CustomScrollbarState extends State<CustomScrollbar> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // BUILD
-  // ─────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return ScrollConfiguration(
