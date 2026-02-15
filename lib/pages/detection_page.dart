@@ -32,7 +32,7 @@ class DetectionPage extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  /// ================= LEFT: TEXT INPUT + BUTTON =================
+                  /// TEXT INPUT
                   Expanded(
                     flex: 10,
                     child: Column(
@@ -58,18 +58,13 @@ class DetectionPage extends StatelessWidget {
                             child: LayoutBuilder(
                               builder: (context, constraints) {
                                 return CustomScrollbar(
-                                  child: SizedBox(
-                                    height: constraints.maxHeight,
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(right: 20),
-                                      child: const TextField(
-                                        maxLines: null,
-                                        keyboardType: TextInputType.multiline,
-                                        decoration: InputDecoration(
-                                          hintText: 'Paste your text here',
-                                          border: InputBorder.none,
-                                        ),
-                                      ),
+                                  child: TextField(
+                                    maxLines: null,
+                                    keyboardType: TextInputType.multiline,
+                                    decoration: InputDecoration(
+                                      hintText: 'Paste your text here',
+                                      border: InputBorder.none,
+                                      contentPadding: const EdgeInsets.only(right: 20),
                                     ),
                                   ),
                                 );
@@ -112,9 +107,9 @@ class DetectionPage extends StatelessWidget {
                             child: Text(
                               'DETECT',
                               style: GoogleFonts.poppins(
-                                fontSize: 16,
+                                fontSize: 18,
                                 fontWeight: FontWeight.w800,
-                                letterSpacing: 1.2,
+                                
                               ),
                             ),
                           ),
@@ -125,12 +120,12 @@ class DetectionPage extends StatelessWidget {
 
                   const SizedBox(width: 20),
 
-                  /// ================= RIGHT: RESULTS AREA =================
+                  /// RESULTS AREA 
                   Expanded(
                     flex: 5,
                     child: Column(
                       children: [
-                        /// TOP BLANK AREA (LIGHTER)
+                        /// TOP BLANK AREA 
                         Container(
                           height: 120,
                           decoration: BoxDecoration(
@@ -140,24 +135,38 @@ class DetectionPage extends StatelessWidget {
                               color: const Color(0xFFA984AE),
                               width: 1,
                             ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFFD4B5E8).withOpacity(0.3),
+                                blurRadius: 0,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
                           ),
                         ),
 
                         const SizedBox(height: 16),
 
-                        /// PERCENTAGES (DARKER BACKGROUND)
+                        /// PERCENTAGES 
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 14,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFf4d2ff), // Darker purple area
+                            color: const Color(0xFFFEE7FF), 
                             borderRadius: BorderRadius.circular(15),
                             border: Border.all(
                               color: const Color(0xFFA984AE),
                               width: 1,
                             ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFFD4B5E8).withOpacity(0.3),
+                                blurRadius: 0,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -165,17 +174,17 @@ class DetectionPage extends StatelessWidget {
                               _PercentageIndicator(
                                 label: 'Male Coded',
                                 percentage: 0,
-                                color: Color(0xFFC49FC9), // Muted purple
+                                color: Color(0xFFC49FC9), 
                               ),
                               _PercentageIndicator(
                                 label: 'Female Coded',
                                 percentage: 0,
-                                color: Color(0xFFB188B6), // Slightly darker
+                                color: Color(0xFFB188B6), 
                               ),
                               _PercentageIndicator(
                                 label: 'Neutral',
                                 percentage: 0,
-                                color: Color(0xFF2D3436), // Deep text color
+                                color: Color(0xFF2D3436), 
                               ),
                             ],
                           ),
@@ -216,7 +225,7 @@ class DetectionPage extends StatelessWidget {
   }
 }
 
-/// ================= PERCENTAGE INDICATOR (REVISED) =================
+/// PERCENTAGE INDICATOR 
 class _PercentageIndicator extends StatelessWidget {
   final String label;
   final int percentage;
@@ -231,7 +240,6 @@ class _PercentageIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      // Bottom border for the underline effect
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
@@ -242,7 +250,7 @@ class _PercentageIndicator extends StatelessWidget {
       ),
       padding: const EdgeInsets.only(bottom: 2),
       child: Text(
-        '$percentage% $label', // Percentage beside the text
+        '$percentage% $label', 
         style: GoogleFonts.poppins(
           fontSize: 13,
           fontWeight: FontWeight.w600,
@@ -253,7 +261,7 @@ class _PercentageIndicator extends StatelessWidget {
   }
 }
 
-/// ================= CODED WORD LIST =================
+/// CODED WORD LIST 
 class _CodedWordList extends StatelessWidget {
   final String title;
   final List<String> words;
@@ -295,25 +303,21 @@ class _CodedWordList extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                return CustomScrollbar(
-                  child: SizedBox(
-                    height: constraints.maxHeight,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: words
-                          .map(
-                            (word) => Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Text(word),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ),
-                );
-              },
+            child: CustomScrollbar(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: words
+                    .map(
+                      (word) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Text(
+                          word,
+                          style: GoogleFonts.poppins(),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
             ),
           ),
         ],
