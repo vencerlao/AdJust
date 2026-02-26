@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../pages/home_page.dart';
+import '../pages/detection_page.dart';
+import '../pages/dashboard_page.dart';
+import '../pages/about_page.dart';
 
 class ResponsiveNavigationBar extends StatelessWidget {
   final String currentPage;
+  final void Function(String page, Widget destination) onNavigate;
 
   const ResponsiveNavigationBar({
     super.key,
     required this.currentPage,
+    required this.onNavigate,
   });
 
   @override
@@ -46,8 +52,8 @@ class ResponsiveNavigationBar extends StatelessWidget {
           vertical: isMobile ? 12 : 16,
         ),
         child: isMobile
-            ? _MobileNav(currentPage: currentPage)
-            : _DesktopNav(currentPage: currentPage),
+            ? _MobileNav(currentPage: currentPage, onNavigate: onNavigate)
+            : _DesktopNav(currentPage: currentPage, onNavigate: onNavigate),
       ),
     );
   }
@@ -55,45 +61,46 @@ class ResponsiveNavigationBar extends StatelessWidget {
 
 class _DesktopNav extends StatelessWidget {
   final String currentPage;
+  final void Function(String page, Widget destination) onNavigate;
 
-  const _DesktopNav({required this.currentPage});
+  const _DesktopNav({
+    required this.currentPage,
+    required this.onNavigate,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const _Logo(),
+        _Logo(onTap: () => onNavigate('home', HomePage(onNavigate: onNavigate))),
         Row(
           children: [
-            _NavItem(
-              label: 'HOME',
-              isActive: currentPage == 'home',
-              onTap: () => Navigator.pushReplacementNamed(context, '/home'),
-            ),
-            const SizedBox(width: 50),
-            _NavItem(
-              label: 'DETECT',
-              isActive: currentPage == 'detection',
-              onTap: () =>
-                  Navigator.pushReplacementNamed(context, '/detection'),
-            ),
-            const SizedBox(width: 50),
-            _NavItem(
-              label: 'DASHBOARD',
-              isActive: currentPage == 'dashboard',
-              onTap: () =>
-                  Navigator.pushReplacementNamed(context, '/dashboard'),
-            ),
-            const SizedBox(width: 50),
-            _NavItem(
-              label: 'ABOUT',
-              isActive: currentPage == 'about',
-              onTap: () =>
-                  Navigator.pushReplacementNamed(context, '/about'),
-            ),
-          ],
-        ),
+          _NavItem(
+            label: 'HOME',
+            isActive: currentPage == 'home',
+            onTap: () => onNavigate('home', HomePage(onNavigate: onNavigate)),
+          ),
+          const SizedBox(width: 50),
+          _NavItem(
+            label: 'DETECT',
+            isActive: currentPage == 'detection',
+            onTap: () => onNavigate('detection', const DetectionPage()),
+          ),
+          const SizedBox(width: 50),
+          _NavItem(
+            label: 'DASHBOARD',
+            isActive: currentPage == 'dashboard',
+            onTap: () => onNavigate('dashboard', const DashboardPage()),
+          ),
+          const SizedBox(width: 50),
+          _NavItem(
+            label: 'ABOUT',
+            isActive: currentPage == 'about',
+            onTap: () => onNavigate('about', const AboutPage()),
+          ),
+        ],
+      ),
       ],
     );
   }
@@ -101,8 +108,9 @@ class _DesktopNav extends StatelessWidget {
 
 class _MobileNav extends StatefulWidget {
   final String currentPage;
+  final void Function(String page, Widget destination) onNavigate;
 
-  const _MobileNav({required this.currentPage});
+  const _MobileNav({required this.currentPage, required this.onNavigate});
 
   @override
   State<_MobileNav> createState() => _MobileNavState();
@@ -116,7 +124,7 @@ class _MobileNavState extends State<_MobileNav> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const _Logo(),
+        _Logo(onTap: () => widget.onNavigate('home', HomePage(onNavigate: widget.onNavigate))),
         IconButton(
           icon: Icon(
             _isMenuOpen ? Icons.close : Icons.menu,
@@ -131,12 +139,13 @@ class _MobileNavState extends State<_MobileNav> {
 }
 
 class _Logo extends StatelessWidget {
-  const _Logo();
+  final VoidCallback onTap;
+  const _Logo({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.pushReplacementNamed(context, '/home'),
+      onTap: onTap,
       child: Image.asset(
         'assets/images/adjust_logo.png',
         height: 35,
@@ -167,8 +176,7 @@ class _NavItemState extends State<_NavItem> {
   @override
   Widget build(BuildContext context) {
     final bool showLine = widget.isActive || _isHovered;
-    final Color lineColor =
-        widget.isActive ? Colors.white : Colors.white70;
+    final Color lineColor = widget.isActive ? Colors.white : Colors.white70;
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
