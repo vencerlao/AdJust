@@ -1,9 +1,12 @@
+import 'package:adjust_app/pages/app_shell.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'pages/app_shell.dart';
 import 'pages/home_page.dart';
 import 'pages/about_page.dart';
 import 'pages/dashboard_page.dart';
 import 'pages/detection_page.dart';
+import 'utils/transitions.dart';
 
 void main() {
   runApp(const MyApp());
@@ -70,13 +73,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.purple,
         fontFamily: 'Poppins',
       ),
-      home: const HomePage(),
-      routes: {
-        '/home': (context) => const HomePage(),
-        '/about': (context) => const AboutPage(),
-        '/dashboard': (context) => const DashboardPage(),
-        '/detection': (context) => const DetectionPage(),
-      },
+      home: const AppShell(),
     );
   }
 }
