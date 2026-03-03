@@ -37,6 +37,7 @@ class AboutPage extends StatelessWidget {
   }
 }
 
+
 class _FeaturesSection extends StatelessWidget {
   const _FeaturesSection();
 
@@ -92,41 +93,6 @@ class _FeaturesSection extends StatelessWidget {
   }
 }
 
-class _FeaturesTimeline extends StatelessWidget {
-  const _FeaturesTimeline();
-
-  @override
-  Widget build(BuildContext context) {
-    final features = [
-      _FeatureData(
-        title: 'Gender Bias Detection',
-        subtitle: 'Identifies subtle and explicit gender-biased terms in job advertisements using NLP.',
-        bullet: 'AdJust scans your text and highlights words or patterns that may influence gendered interpretations during recruitment.',
-        isDark: true,
-      ),
-      _FeatureData(
-        title: 'Mitigation',
-        subtitle: 'Provides clear, gender-neutral alternatives to biased language.',
-        bullet: 'Once bias is detected, AdJust offers suggested replacements to help you rewrite job ads in a fair, inclusive, and professional way.',
-        isDark: false,
-      ),
-      _FeatureData(
-        title: 'Awareness',
-        subtitle: 'Visualizes the prevalence of gender bias across ten years.',
-        bullet: 'The dashboard shows patterns, trends, and overall bias levels—empowering you to monitor improvements and maintain inclusive hiring practices.',
-        isDark: false,
-      ),
-    ];
-
-    return Column(
-      children: List.generate(features.length, (i) {
-        final isLast = i == features.length - 1;
-        return _TimelineItem(feature: features[i], isLast: isLast);
-      }),
-    );
-  }
-}
-
 class _FeatureData {
   final String title;
   final String subtitle;
@@ -140,94 +106,194 @@ class _FeatureData {
   });
 }
 
-class _TimelineItem extends StatelessWidget {
-  final _FeatureData feature;
-  final bool isLast;
 
-  const _TimelineItem({required this.feature, required this.isLast});
+class _FeaturesTimeline extends StatelessWidget {
+  const _FeaturesTimeline();
+
+  static const _features = [
+    _FeatureData(
+      title: 'Gender Bias Detection',
+      subtitle: 'Identifies subtle and explicit gender-biased terms in job advertisements using NLP.',
+      bullet: 'AdJust scans your text and highlights words or patterns that may influence gendered interpretations during recruitment.',
+      isDark: true,
+    ),
+    _FeatureData(
+      title: 'Mitigation',
+      subtitle: 'Provides clear, gender-neutral alternatives to biased language.',
+      bullet: 'Once bias is detected, AdJust offers suggested replacements to help you rewrite job ads in a fair, inclusive, and professional way.',
+      isDark: false,
+    ),
+    _FeatureData(
+      title: 'Awareness',
+      subtitle: 'Visualizes the prevalence of gender bias across ten years.',
+      bullet: 'The dashboard shows patterns, trends, and overall bias levels—empowering you to monitor improvements and maintain inclusive hiring practices.',
+      isDark: false,
+    ),
+  ];
+
+  static const double _itemHeight = 150.0;
+  static const double _leftDotX = 12.0;
+  static const double _rightDotX = 52.0;
+  static const double _dotAreaWidth = 70.0;
+  static const double _dotTopOffset = 17.0;
 
   @override
   Widget build(BuildContext context) {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return SizedBox(
+      width: double.infinity,
+      height: _itemHeight * _features.length,
+      child: Stack(
         children: [
-          SizedBox(
-            width: 28,
-            child: Column(
-              children: [
-                Container(
-                  width: 18,
-                  height: 18,
-                  margin: const EdgeInsets.only(top: 6),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: feature.isDark
-                        ? const Color(0xFF3D1A6B)
-                        : const Color(0xFFB08CC8),
-                  ),
-                ),
-                if (!isLast)
-                  Expanded(
-                    child: Container(width: 2, color: const Color(0xFFB08CC8)),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(bottom: isLast ? 0 : 32.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    feature.title,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontFamily: 'Poppins',
-                      fontWeight: FontWeight.w700,
-                      fontStyle: FontStyle.italic,
-                      color: Color(0xFF2A1040),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    feature.subtitle,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontFamily: 'Poppins',
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF2A1040),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('• ', style: TextStyle(fontSize: 14, color: Color(0xFF444444))),
-                      Expanded(
-                        child: Text(
-                          feature.bullet,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontFamily: 'Poppins',
-                            fontWeight: FontWeight.w500,
-                            color: Color(0xFF2A1040),
-                            height: 1.5,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _ZigzagPainter(
+                itemCount: _features.length,
+                itemHeight: _itemHeight,
+                leftDotX: _leftDotX,
+                rightDotX: _rightDotX,
+                dotTopOffset: _dotTopOffset,
               ),
             ),
+          ),
+
+          Column(
+            children: List.generate(_features.length, (i) {
+              final f = _features[i];
+              final bool isLeft = i % 2 == 0;
+              final double dotX = isLeft ? _leftDotX : _rightDotX;
+              final double dotSize = f.isDark ? 22 : 16;
+
+              return SizedBox(
+                height: _itemHeight,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: _dotAreaWidth,
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            top: _dotTopOffset - dotSize / 2,
+                            left: dotX - dotSize / 2,
+                            child: Container(
+                              width: dotSize,
+                              height: dotSize,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: f.isDark
+                                    ? const Color(0xFF3D1A6B)
+                                    : const Color(0xFFB08CC8),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            f.title,
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontFamily: 'Poppins',
+                              fontWeight: FontWeight.w700,
+                              fontStyle: FontStyle.italic,
+                              color: Color(0xFF2A1040),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            f.subtitle,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontFamily: 'Poppins',
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF2A1040),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '• ',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xFF444444),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  f.bullet,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontFamily: 'Poppins',
+                                    fontWeight: FontWeight.w500,
+                                    color: Color(0xFF2A1040),
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
           ),
         ],
       ),
     );
   }
+}
+
+class _ZigzagPainter extends CustomPainter {
+  final int itemCount;
+  final double itemHeight;
+  final double leftDotX;
+  final double rightDotX;
+  final double dotTopOffset;
+
+  const _ZigzagPainter({
+    required this.itemCount,
+    required this.itemHeight,
+    required this.leftDotX,
+    required this.rightDotX,
+    required this.dotTopOffset,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFFB08CC8)
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    for (int i = 0; i < itemCount - 1; i++) {
+      final double startX = (i % 2 == 0) ? leftDotX : rightDotX;
+      final double endX   = (i % 2 == 0) ? rightDotX : leftDotX;
+      final double startY = i * itemHeight + dotTopOffset;
+      final double endY   = (i + 1) * itemHeight + dotTopOffset;
+
+      canvas.drawLine(
+        Offset(startX, startY),
+        Offset(endX, endY),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ZigzagPainter oldDelegate) =>
+      oldDelegate.itemHeight != itemHeight ||
+      oldDelegate.itemCount != itemCount;
 }
 
 class _TeamSection extends StatelessWidget {
