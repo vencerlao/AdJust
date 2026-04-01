@@ -40,7 +40,7 @@ class HomePage extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 30),
                 child: Text(
-                  '"A website for gender detection, mitigation, and awareness"', //tagline
+                  '"A website for gender detection, mitigation, and awareness"', // Web slogan
                   textAlign: TextAlign.center,
                   style: GoogleFonts.poppins(
                     fontSize: 24,
