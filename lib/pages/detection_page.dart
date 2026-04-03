@@ -1,9 +1,72 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:adjust_app/widgets/custom_scrollbar.dart';
+import 'package:adjust_app/services/bias_detection_service.dart';
+import 'package:fl_chart/fl_chart.dart';
 
-class DetectionPage extends StatelessWidget {
+class DetectionPage extends StatefulWidget {
   const DetectionPage({super.key});
+
+  @override
+  State<DetectionPage> createState() => _DetectionPageState();
+}
+
+class _DetectionPageState extends State<DetectionPage> {
+  late TextEditingController _textController;
+  BiasDetectionResult? _result;
+  bool _isLoading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _textController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _detectBias() async {
+    final text = _textController.text.trim();
+    if (text.isEmpty) {
+      setState(() => _error = 'Please enter some text');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final result = await BiasDetectionService.detectBias(text);
+      setState(() {
+        _result = result;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Color _getClassColor(String className) {
+    switch (className) {
+      case 'male_biased':
+        return const Color(0xFFC49FC9);
+      case 'female_biased':
+        return const Color(0xFFB188B6);
+      case 'neutral':
+        return const Color(0xFF2D3436);
+      default:
+        return Colors.grey;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +114,7 @@ class DetectionPage extends StatelessWidget {
                       builder: (context, constraints) {
                         return CustomScrollbar(
                           child: TextField(
+                            controller: _textController,
                             maxLines: null,
                             keyboardType: TextInputType.multiline,
                             decoration: InputDecoration(
@@ -68,16 +132,21 @@ class DetectionPage extends StatelessWidget {
                 Align(
                   alignment: Alignment.center,
                   child: ElevatedButton(
-                    onPressed: () {},
+                    onPressed: _isLoading ? null : _detectBias,
                     style: ButtonStyle(
                       padding: MaterialStateProperty.all(
                         const EdgeInsets.symmetric(horizontal: 100, vertical: 18),
                       ),
                       elevation: MaterialStateProperty.all(4),
                       backgroundColor: MaterialStateProperty.resolveWith<Color>(
-                        (states) => states.contains(MaterialState.hovered)
-                            ? const Color(0xFF3A0E52)
-                            : const Color(0xFFD4B5E8),
+                        (states) {
+                          if (states.contains(MaterialState.disabled)) {
+                            return const Color(0xFFD4B5E8).withOpacity(0.6);
+                          }
+                          return states.contains(MaterialState.hovered)
+                              ? const Color(0xFF3A0E52)
+                              : const Color(0xFFD4B5E8);
+                        },
                       ),
                       foregroundColor: MaterialStateProperty.resolveWith<Color>(
                         (states) => states.contains(MaterialState.hovered)
@@ -96,15 +165,33 @@ class DetectionPage extends StatelessWidget {
                         ),
                       ),
                     ),
-                    child: Text(
-                      'DETECT',
-                      style: GoogleFonts.poppins(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text(
+                            'DETECT',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                   ),
                 ),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      _error!,
+                      style: GoogleFonts.poppins(
+                        color: Colors.red,
+                        fontSize: 12,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -116,9 +203,10 @@ class DetectionPage extends StatelessWidget {
             flex: 5,
             child: Column(
               children: [
-                /// For Graph stats
+                /// For Graph stats - Shows detection results
                 Container(
-                  height: 120,
+                  height: 200,
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF9F5FB),
                     borderRadius: BorderRadius.circular(15),
@@ -134,6 +222,109 @@ class DetectionPage extends StatelessWidget {
                       ),
                     ],
                   ),
+                  child: _result == null
+                      ? Center(
+                          child: Text(
+                            'Detection results will appear here',
+                            style: GoogleFonts.poppins(
+                              color: Colors.grey,
+                              fontSize: 13,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        )
+                      : Row(
+                          children: [
+                            Expanded(
+                              flex: 1,
+                              child: PieChart(
+                                PieChartData(
+                                  centerSpaceRadius: 40,
+                                  sections: [
+                                    PieChartSectionData(
+                                      value: (_result!.confidenceScores['male_biased'] ?? 0) * 100,
+                                      color: const Color(0xFFC49FC9),
+                                      title: '${((_result!.confidenceScores['male_biased'] ?? 0) * 100).toStringAsFixed(1)}%',
+                                      titleStyle: GoogleFonts.poppins(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white,
+                                      ),
+                                      radius: 50,
+                                    ),
+                                    PieChartSectionData(
+                                      value: (_result!.confidenceScores['female_biased'] ?? 0) * 100,
+                                      color: const Color(0xFFB188B6),
+                                      title: '${((_result!.confidenceScores['female_biased'] ?? 0) * 100).toStringAsFixed(1)}%',
+                                      titleStyle: GoogleFonts.poppins(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white,
+                                      ),
+                                      radius: 50,
+                                    ),
+                                    PieChartSectionData(
+                                      value: (_result!.confidenceScores['neutral'] ?? 0) * 100,
+                                      color: const Color(0xFF2D3436),
+                                      title: '${((_result!.confidenceScores['neutral'] ?? 0) * 100).toStringAsFixed(1)}%',
+                                      titleStyle: GoogleFonts.poppins(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white,
+                                      ),
+                                      radius: 50,
+                                    ),
+                                  ],
+                                  borderData: FlBorderData(show: false),
+                                  pieTouchData: PieTouchData(enabled: false),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              flex: 1,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'This text is mostly classified as',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 11,
+                                      color: Colors.grey,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    _result!.detectedClass
+                                        .replaceAll('_', ' ')
+                                        .toUpperCase(),
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      color: _getClassColor(_result!.detectedClass),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Container(
+                                    height: 1,
+                                    color: _getClassColor(_result!.detectedClass).withOpacity(0.3),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'the indicated job advertisement is\n${_result!.detectedClass.replaceAll('_', ' ')}.',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 10,
+                                      color: const Color(0xFF666666),
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                 ),
 
                 const SizedBox(height: 16),
@@ -161,21 +352,27 @@ class DetectionPage extends StatelessWidget {
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: const [
+                    children: [
                       _PercentageIndicator(
-                        label: 'Male Coded',
-                        percentage: 0,
-                        color: Color(0xFFC49FC9),
+                        label: 'Male Biased',
+                        percentage: _result != null
+                            ? (_result!.confidenceScores['male_biased'] ?? 0) * 100
+                            : 0,
+                        color: const Color(0xFFC49FC9),
                       ),
                       _PercentageIndicator(
-                        label: 'Female Coded',
-                        percentage: 0,
-                        color: Color(0xFFB188B6),
+                        label: 'Female Biased',
+                        percentage: _result != null
+                            ? (_result!.confidenceScores['female_biased'] ?? 0) * 100
+                            : 0,
+                        color: const Color(0xFFB188B6),
                       ),
                       _PercentageIndicator(
                         label: 'Neutral',
-                        percentage: 0,
-                        color: Color(0xFF2D3436),
+                        percentage: _result != null
+                            ? (_result!.confidenceScores['neutral'] ?? 0) * 100
+                            : 0,
+                        color: const Color(0xFF2D3436),
                       ),
                     ],
                   ),
@@ -186,18 +383,18 @@ class DetectionPage extends StatelessWidget {
                 /// CODED WORD LISTS
                 Expanded(
                   child: Row(
-                    children: const [
+                    children: [
                       Expanded(
                         child: _CodedWordList(
                           title: 'Masculine Coded Words',
-                          words: [],
+                          words: _result?.flaggedPhrases ?? [],
                         ),
                       ),
-                      SizedBox(width: 12),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: _CodedWordList(
                           title: 'Feminine Coded Words',
-                          words: [],
+                          words: _result?.flaggedPhrases ?? [],
                         ),
                       ),
                     ],
@@ -215,7 +412,7 @@ class DetectionPage extends StatelessWidget {
 /// PERCENTAGE INDICATOR
 class _PercentageIndicator extends StatelessWidget {
   final String label;
-  final int percentage;
+  final double percentage;
   final Color color;
 
   const _PercentageIndicator({
@@ -234,7 +431,7 @@ class _PercentageIndicator extends StatelessWidget {
       ),
       padding: const EdgeInsets.only(bottom: 2),
       child: Text(
-        '$percentage% $label',
+        '${percentage.toStringAsFixed(1)}% $label',
         style: GoogleFonts.poppins(
           fontSize: 13,
           fontWeight: FontWeight.w600,
@@ -287,19 +484,30 @@ class _CodedWordList extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: CustomScrollbar(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: words
-                    .map(
-                      (word) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Text(word, style: GoogleFonts.poppins()),
+            child: words.isEmpty
+                ? Center(
+                    child: Text(
+                      'No words detected',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        color: Colors.grey,
                       ),
-                    )
-                    .toList(),
-              ),
-            ),
+                    ),
+                  )
+                : CustomScrollbar(
+                    child: ListView.builder(
+                      itemCount: words.length,
+                      itemBuilder: (context, index) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Text(
+                            words[index],
+                            style: GoogleFonts.poppins(fontSize: 12),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
           ),
         ],
       ),
