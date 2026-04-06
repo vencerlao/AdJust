@@ -16,6 +16,7 @@ class _DetectionPageState extends State<DetectionPage> {
   BiasDetectionResult? _result;
   bool _isLoading = false;
   String? _error;
+  int _hoveredSectionIndex = -1;
 
   @override
   void initState() {
@@ -68,6 +69,15 @@ class _DetectionPageState extends State<DetectionPage> {
     }
   }
 
+  List<String> _getWords(String key) {
+    if (_result == null) return [];
+    final raw = _result!.flaggedPhrases[key];
+    if (raw == null) return [];
+    if (raw is List<String>) return raw;
+    if (raw is List) return raw.map((e) => e.toString()).toList();
+    return [];
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -117,10 +127,10 @@ class _DetectionPageState extends State<DetectionPage> {
                             controller: _textController,
                             maxLines: null,
                             keyboardType: TextInputType.multiline,
-                            decoration: InputDecoration(
+                            decoration: const InputDecoration(
                               hintText: 'Paste your text here',
                               border: InputBorder.none,
-                              contentPadding: const EdgeInsets.only(right: 20),
+                              contentPadding: EdgeInsets.only(right: 20),
                             ),
                           ),
                         );
@@ -135,25 +145,26 @@ class _DetectionPageState extends State<DetectionPage> {
                     onPressed: _isLoading ? null : _detectBias,
                     style: ButtonStyle(
                       padding: MaterialStateProperty.all(
-                        const EdgeInsets.symmetric(horizontal: 100, vertical: 18),
+                        const EdgeInsets.symmetric(
+                            horizontal: 100, vertical: 18),
                       ),
                       elevation: MaterialStateProperty.all(4),
-                      backgroundColor: MaterialStateProperty.resolveWith<Color>(
-                        (states) {
-                          if (states.contains(MaterialState.disabled)) {
-                            return const Color(0xFFD4B5E8).withOpacity(0.6);
-                          }
-                          return states.contains(MaterialState.hovered)
-                              ? const Color(0xFF3A0E52)
-                              : const Color(0xFFD4B5E8);
-                        },
-                      ),
-                      foregroundColor: MaterialStateProperty.resolveWith<Color>(
-                        (states) => states.contains(MaterialState.hovered)
-                            ? const Color(0xFFD4B5E8)
-                            : const Color(0xFF280647),
-                      ),
-                      shape: MaterialStateProperty.resolveWith<OutlinedBorder>(
+                      backgroundColor:
+                          MaterialStateProperty.resolveWith<Color>((states) {
+                        if (states.contains(MaterialState.disabled)) {
+                          return const Color(0xFFD4B5E8).withOpacity(0.6);
+                        }
+                        return states.contains(MaterialState.hovered)
+                            ? const Color(0xFF3A0E52)
+                            : const Color(0xFFD4B5E8);
+                      }),
+                      foregroundColor:
+                          MaterialStateProperty.resolveWith<Color>((states) =>
+                              states.contains(MaterialState.hovered)
+                                  ? const Color(0xFFD4B5E8)
+                                  : const Color(0xFF280647)),
+                      shape:
+                          MaterialStateProperty.resolveWith<OutlinedBorder>(
                         (states) => RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(30),
                           side: BorderSide(
@@ -196,17 +207,16 @@ class _DetectionPageState extends State<DetectionPage> {
             ),
           ),
 
-          const SizedBox(width: 20),
+          const SizedBox(width: 10),
 
-          /// RESULTS AREA
           Expanded(
             flex: 5,
             child: Column(
               children: [
-                /// For Graph stats - Shows detection results
                 Container(
-                  height: 200,
-                  padding: const EdgeInsets.all(16),
+                  height: 190,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 18),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF9F5FB),
                     borderRadius: BorderRadius.circular(15),
@@ -234,55 +244,76 @@ class _DetectionPageState extends State<DetectionPage> {
                           ),
                         )
                       : Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Expanded(
-                              flex: 1,
-                              child: PieChart(
-                                PieChartData(
-                                  centerSpaceRadius: 40,
-                                  sections: [
-                                    PieChartSectionData(
-                                      value: (_result!.confidenceScores['male_biased'] ?? 0) * 100,
-                                      color: const Color(0xFFC49FC9),
-                                      title: '${((_result!.confidenceScores['male_biased'] ?? 0) * 100).toStringAsFixed(1)}%',
-                                      titleStyle: GoogleFonts.poppins(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.white,
+                            SizedBox(
+                              width: 170,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 110,
+                                    height: 110,
+                                    child: PieChart(
+                                      PieChartData(
+                                        centerSpaceRadius: 55,
+                                        sections: [
+                                          PieChartSectionData(
+                                            value: (_result!.confidenceScores['male_biased'] ?? 0) * 100,
+                                            color: const Color(0xFFC49FC9),
+                                            title: '',
+                                            radius: _hoveredSectionIndex == 0 ? 28 : 20,
+                                          ),
+                                          PieChartSectionData(
+                                            value: (_result!.confidenceScores['female_biased'] ?? 0) * 100,
+                                            color: const Color(0xFFB188B6),
+                                            title: '',
+                                            radius: _hoveredSectionIndex == 1 ? 28 : 20,
+                                          ),
+                                          PieChartSectionData(
+                                            value: (_result!.confidenceScores['neutral'] ?? 0) * 100,
+                                            color: const Color(0xFF2D3436),
+                                            title: '',
+                                            radius: _hoveredSectionIndex == 2 ? 28 : 20,
+                                          ),
+                                        ],
+                                        borderData: FlBorderData(show: false),
+                                        pieTouchData: PieTouchData(
+                                          enabled: true,
+                                          touchCallback: (FlTouchEvent event, PieTouchResponse? response) {
+                                            setState(() {
+                                              if (event is FlPointerHoverEvent &&
+                                                  response != null &&
+                                                  response.touchedSection != null) {
+                                                _hoveredSectionIndex = response
+                                                    .touchedSection!
+                                                    .touchedSectionIndex;
+                                              } else if (event is FlPointerExitEvent) {
+                                                _hoveredSectionIndex = -1;
+                                              }
+                                            });
+                                          },
+                                        ),
                                       ),
-                                      radius: 50,
                                     ),
-                                    PieChartSectionData(
-                                      value: (_result!.confidenceScores['female_biased'] ?? 0) * 100,
-                                      color: const Color(0xFFB188B6),
-                                      title: '${((_result!.confidenceScores['female_biased'] ?? 0) * 100).toStringAsFixed(1)}%',
-                                      titleStyle: GoogleFonts.poppins(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.white,
-                                      ),
-                                      radius: 50,
-                                    ),
-                                    PieChartSectionData(
-                                      value: (_result!.confidenceScores['neutral'] ?? 0) * 100,
+                                  ),
+                                  Text(
+                                    _result!.detectedClass
+                                        .replaceAll('_biased', '')
+                                        .toUpperCase(),
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w700,
                                       color: const Color(0xFF2D3436),
-                                      title: '${((_result!.confidenceScores['neutral'] ?? 0) * 100).toStringAsFixed(1)}%',
-                                      titleStyle: GoogleFonts.poppins(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.white,
-                                      ),
-                                      radius: 50,
                                     ),
-                                  ],
-                                  borderData: FlBorderData(show: false),
-                                  pieTouchData: PieTouchData(enabled: false),
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              flex: 1,
+
+                            const SizedBox(width: 24),
+
+                            Flexible(
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -290,34 +321,47 @@ class _DetectionPageState extends State<DetectionPage> {
                                   Text(
                                     'This text is mostly classified as',
                                     style: GoogleFonts.poppins(
-                                      fontSize: 11,
+                                      fontSize: 14,
                                       color: Colors.grey,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
-                                  const SizedBox(height: 6),
+                                  const SizedBox(height: 4),
                                   Text(
-                                    _result!.detectedClass
-                                        .replaceAll('_', ' ')
-                                        .toUpperCase(),
+                                    '${_result!.detectedClass.replaceAll('_', ' ').toUpperCase()} CODED',
                                     style: GoogleFonts.poppins(
-                                      fontSize: 16,
+                                      fontSize: 18,
                                       fontWeight: FontWeight.w800,
-                                      color: _getClassColor(_result!.detectedClass),
+                                      color: _getClassColor(
+                                          _result!.detectedClass),
                                     ),
                                   ),
-                                  const SizedBox(height: 12),
+                                  const SizedBox(height: 10),
                                   Container(
                                     height: 1,
-                                    color: _getClassColor(_result!.detectedClass).withOpacity(0.3),
+                                    color: _getClassColor(
+                                            _result!.detectedClass)
+                                        .withOpacity(0.3),
                                   ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    'the indicated job advertisement is\n${_result!.detectedClass.replaceAll('_', ' ')}.',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 10,
-                                      color: const Color(0xFF666666),
-                                      height: 1.4,
+                                  const SizedBox(height: 10),
+                                  RichText(
+                                    text: TextSpan(
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 14,
+                                        color: const Color(0xFF666666),
+                                        height: 1.5,
+                                      ),
+                                      children: [
+                                        const TextSpan(
+                                          text: 'the indicated job advertisement is\n',
+                                        ),
+                                        TextSpan(
+                                          text: '${_result!.detectedClass.replaceAll('_', ' ')}.',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
@@ -329,7 +373,6 @@ class _DetectionPageState extends State<DetectionPage> {
 
                 const SizedBox(height: 16),
 
-                /// PERCENTAGES
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
@@ -359,6 +402,7 @@ class _DetectionPageState extends State<DetectionPage> {
                             ? (_result!.confidenceScores['male_biased'] ?? 0) * 100
                             : 0,
                         color: const Color(0xFFC49FC9),
+                        isHighlighted: _hoveredSectionIndex == 0,
                       ),
                       _PercentageIndicator(
                         label: 'Female Biased',
@@ -366,6 +410,7 @@ class _DetectionPageState extends State<DetectionPage> {
                             ? (_result!.confidenceScores['female_biased'] ?? 0) * 100
                             : 0,
                         color: const Color(0xFFB188B6),
+                        isHighlighted: _hoveredSectionIndex == 1,
                       ),
                       _PercentageIndicator(
                         label: 'Neutral',
@@ -373,6 +418,7 @@ class _DetectionPageState extends State<DetectionPage> {
                             ? (_result!.confidenceScores['neutral'] ?? 0) * 100
                             : 0,
                         color: const Color(0xFF2D3436),
+                        isHighlighted: _hoveredSectionIndex == 2,
                       ),
                     ],
                   ),
@@ -380,21 +426,20 @@ class _DetectionPageState extends State<DetectionPage> {
 
                 const SizedBox(height: 16),
 
-                /// CODED WORD LISTS
                 Expanded(
                   child: Row(
                     children: [
                       Expanded(
                         child: _CodedWordList(
                           title: 'Masculine Coded Words',
-                          words: _result?.flaggedPhrases ?? [],
+                          words: _getWords('masculine'),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: _CodedWordList(
                           title: 'Feminine Coded Words',
-                          words: _result?.flaggedPhrases ?? [],
+                          words: _getWords('feminine'),
                         ),
                       ),
                     ],
@@ -409,16 +454,17 @@ class _DetectionPageState extends State<DetectionPage> {
   }
 }
 
-/// PERCENTAGE INDICATOR
 class _PercentageIndicator extends StatelessWidget {
   final String label;
   final double percentage;
   final Color color;
+  final bool isHighlighted;
 
   const _PercentageIndicator({
     required this.label,
     required this.percentage,
     required this.color,
+    this.isHighlighted = false,
   });
 
   @override
@@ -431,10 +477,10 @@ class _PercentageIndicator extends StatelessWidget {
       ),
       padding: const EdgeInsets.only(bottom: 2),
       child: Text(
-        '${percentage.toStringAsFixed(1)}% $label',
+        '${percentage.toStringAsFixed(1)}%  $label',
         style: GoogleFonts.poppins(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
+          fontSize: isHighlighted ? 13 : 12,
+          fontWeight: isHighlighted ? FontWeight.w700 : FontWeight.w600,
           color: color,
         ),
       ),
@@ -442,7 +488,6 @@ class _PercentageIndicator extends StatelessWidget {
   }
 }
 
-/// CODED WORD LIST
 class _CodedWordList extends StatelessWidget {
   final String title;
   final List<String> words;
@@ -502,7 +547,11 @@ class _CodedWordList extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           child: Text(
                             words[index],
-                            style: GoogleFonts.poppins(fontSize: 12),
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              color: const Color(0xFF333333),
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         );
                       },
