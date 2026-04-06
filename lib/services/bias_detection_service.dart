@@ -4,7 +4,7 @@ import 'dart:convert';
 class BiasDetectionResult {
   final String detectedClass;
   final Map<String, double> confidenceScores;
-  final List<String> flaggedPhrases;
+  final Map<String, List<String>> flaggedPhrases;
   final String accuracyNote;
 
   BiasDetectionResult({
@@ -22,7 +22,11 @@ class BiasDetectionResult {
           (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
         ),
       ),
-      flaggedPhrases: List<String>.from(json['flagged_phrases'] ?? []),
+      flaggedPhrases: Map<String, List<String>>.from(
+        (json['flagged_phrases'] as Map).map(
+          (k, v) => MapEntry(k.toString(), List<String>.from(v)),
+        ),
+      ),
       accuracyNote: json['accuracy_note'] ?? '',
     );
   }
