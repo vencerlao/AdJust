@@ -127,8 +127,26 @@ class _DetectionPageState extends State<DetectionPage> {
                             controller: _textController,
                             maxLines: null,
                             keyboardType: TextInputType.multiline,
-                            decoration: const InputDecoration(
-                              hintText: 'Paste your text here',
+                            onTap: () {
+                              if (_error != null) {
+                                setState(() => _error = null);
+                              }
+                            },
+                            onChanged: (value) {
+                              if (_error != null) {
+                                setState(() => _error = null);
+                              }
+                              if (value.trim().isEmpty && _result != null) {
+                                setState(() => _result = null);
+                              }
+                            },
+                            decoration: InputDecoration(
+                              hintText: _error ?? 'Paste your text here',
+                              hintStyle: GoogleFonts.poppins(
+                                color: _error != null ? Colors.red : Colors.grey,
+                                fontSize: _error != null ? 14 : 13,
+                                fontWeight: _error != null ? FontWeight.w400 : FontWeight.normal,
+                              ),
                               border: InputBorder.none,
                               contentPadding: EdgeInsets.only(right: 20),
                             ),
@@ -191,18 +209,18 @@ class _DetectionPageState extends State<DetectionPage> {
                           ),
                   ),
                 ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      _error!,
-                      style: GoogleFonts.poppins(
-                        color: Colors.red,
-                        fontSize: 12,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
+                // if (_error != null)
+                //   Padding(
+                //     padding: const EdgeInsets.only(top: 12),
+                //     child: Text(
+                //       _error!,
+                //       style: GoogleFonts.poppins(
+                //         color: Colors.red,
+                //         fontSize: 12,
+                //       ),
+                //       textAlign: TextAlign.center,
+                //     ),
+                //   ),
               ],
             ),
           ),
@@ -278,22 +296,7 @@ class _DetectionPageState extends State<DetectionPage> {
                                           ),
                                         ],
                                         borderData: FlBorderData(show: false),
-                                        pieTouchData: PieTouchData(
-                                          enabled: true,
-                                          touchCallback: (FlTouchEvent event, PieTouchResponse? response) {
-                                            setState(() {
-                                              if (event is FlPointerHoverEvent &&
-                                                  response != null &&
-                                                  response.touchedSection != null) {
-                                                _hoveredSectionIndex = response
-                                                    .touchedSection!
-                                                    .touchedSectionIndex;
-                                              } else if (event is FlPointerExitEvent) {
-                                                _hoveredSectionIndex = -1;
-                                              }
-                                            });
-                                          },
-                                        ),
+                                        pieTouchData: PieTouchData(enabled: false),
                                       ),
                                     ),
                                   ),
@@ -403,6 +406,11 @@ class _DetectionPageState extends State<DetectionPage> {
                             : 0,
                         color: const Color(0xFFC49FC9),
                         isHighlighted: _hoveredSectionIndex == 0,
+                        onHover: (hovering) {
+                          setState(() {
+                            _hoveredSectionIndex = hovering ? 0 : -1;
+                          });
+                        },
                       ),
                       _PercentageIndicator(
                         label: 'Female Biased',
@@ -411,6 +419,11 @@ class _DetectionPageState extends State<DetectionPage> {
                             : 0,
                         color: const Color(0xFFB188B6),
                         isHighlighted: _hoveredSectionIndex == 1,
+                        onHover: (hovering) {
+                          setState(() {
+                            _hoveredSectionIndex = hovering ? 1 : -1;
+                          });
+                        },
                       ),
                       _PercentageIndicator(
                         label: 'Neutral',
@@ -419,6 +432,11 @@ class _DetectionPageState extends State<DetectionPage> {
                             : 0,
                         color: const Color(0xFF2D3436),
                         isHighlighted: _hoveredSectionIndex == 2,
+                        onHover: (hovering) {
+                          setState(() {
+                            _hoveredSectionIndex = hovering ? 2 : -1;
+                          });
+                        },
                       ),
                     ],
                   ),
@@ -459,29 +477,39 @@ class _PercentageIndicator extends StatelessWidget {
   final double percentage;
   final Color color;
   final bool isHighlighted;
+  final ValueChanged<bool> onHover;
 
   const _PercentageIndicator({
     required this.label,
     required this.percentage,
     required this.color,
+    required this.onHover,
     this.isHighlighted = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: color, width: 2.0),
+    return MouseRegion(
+      onEnter: (_) => onHover(true),
+      onExit: (_) => onHover(false),
+      cursor: SystemMouseCursors.click,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          color: isHighlighted ? color : Colors.transparent,
+          borderRadius: BorderRadius.circular(isHighlighted ? 6 : 0),
+          border: isHighlighted
+              ? Border.all(color: color, width: 1)
+              : Border(bottom: BorderSide(color: color, width: 2.0)),
         ),
-      ),
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Text(
-        '${percentage.toStringAsFixed(1)}%  $label',
-        style: GoogleFonts.poppins(
-          fontSize: isHighlighted ? 13 : 12,
-          fontWeight: isHighlighted ? FontWeight.w700 : FontWeight.w600,
-          color: color,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Text(
+          '${percentage.toStringAsFixed(1)}%  $label',
+          style: GoogleFonts.poppins(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: isHighlighted ? Colors.white : color,
+          ),
         ),
       ),
     );
