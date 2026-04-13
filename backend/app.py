@@ -9,9 +9,17 @@ import numpy as np
 import re
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from dotenv import load_dotenv
+from groq import Groq
 
 app = Flask(__name__)
 CORS(app)
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Initialize Groq client for suggestion generation
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 # Load configuration
 config_path = os.path.join(os.path.dirname(__file__), 'models', 'config.json')
@@ -177,9 +185,7 @@ def extract_flagged_phrases(text: str) -> dict:
         {"masculine": ["word1", ...], "feminine": ["word1", ...]}
         Both lists are sorted and deduplicated.
     """
-    # Normalise the text once
     text_lower = text.lower()
-    # Normalise smart quotes / curly apostrophes that survive copy-paste
     text_lower = (
         text_lower
         .replace('\u2019', "'").replace('\u2018', "'")
@@ -187,14 +193,10 @@ def extract_flagged_phrases(text: str) -> dict:
     )
 
     def _matches(keyword: str) -> bool:
-        # Multi-word phrase — plain substring is safe
         if ' ' in keyword:
             return keyword in text_lower
-        # Root words that inflect by adding suffixes — use substring so
-        # "manage" catches "management" / "managing" / "manages"
         if keyword.endswith(('e', 'al', 'ion', 'ive', 'ment', 'ence', 'ance')):
             return keyword in text_lower
-        # Default: whole-word boundary match
         pattern = r'\b' + re.escape(keyword) + r'\b'
         return bool(re.search(pattern, text_lower))
 
@@ -202,6 +204,52 @@ def extract_flagged_phrases(text: str) -> dict:
     feminine  = sorted({kw for kw in _FEMININE_KEYWORDS  if _matches(kw)})
 
     return {'masculine': masculine, 'feminine': feminine}
+
+
+# ---------------------------------------------------------------------------
+# Job-ad context summariser
+# ---------------------------------------------------------------------------
+
+def summarise_job_ad_context(full_text: str) -> str:
+    """
+    Use Groq to extract a compact structural summary of the job ad.
+
+    This summary — not the raw full text — is injected into every /suggest
+    prompt so Groq understands role, industry, tone, and register without
+    exceeding token limits.
+
+    Returns a plain-text summary string, or an empty string on failure.
+    """
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a job advertisement analyst. "
+                        "Read the job advertisement and return a SHORT structured summary "
+                        "covering ONLY these five points, each on its own line:\n"
+                        "1. Job title\n"
+                        "2. Industry / sector\n"
+                        "3. Key responsibilities (max 10 words)\n"
+                        "4. Tone (e.g. formal, casual, corporate, startup)\n"
+                        "5. Any specific audience signals (e.g. fresh grad, senior, technical)\n\n"
+                        "Return ONLY these five lines. No extra commentary."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": full_text[:3000]   # cap at ~3 000 chars to stay within token budget
+                }
+            ],
+            max_tokens=120,
+            temperature=0.1,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"[summarise_job_ad_context] Failed: {e}")
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +309,169 @@ def detect_bias():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/suggest', methods=['POST'])
+def suggest_alternative():
+    """
+    Generate a grammar- and full-job-ad-context-aware gender-neutral alternative
+    using Groq.
+
+    Request:
+    {
+        "term":      "<biased word>",
+        "bias_type": "masculine" | "feminine",
+        "context":   "<the specific sentence containing the term>",   # optional but recommended
+        "full_text": "<entire job advertisement text>"                 # NEW — enables full-ad awareness
+    }
+
+    How full-ad context works
+    ─────────────────────────
+    When `full_text` is supplied the endpoint runs a lightweight pre-pass with
+    Groq to extract a compact structural summary of the ad (job title, industry,
+    tone, audience signals, key responsibilities).  That summary — rather than
+    the raw full text — is then injected into the suggestion prompt so the LLM
+    can choose a replacement word that:
+
+      • fits the role and industry (e.g. "assertive" → "decisive" in a sales
+        context vs. "clear-minded" in a healthcare context)
+      • matches the register and formality of the ad
+      • is idiomatic within the Philippine job market
+      • slots in grammatically inside the specific sentence (`context` field)
+
+    If `full_text` is absent the endpoint falls back to the previous
+    sentence-only behaviour.
+
+    Response:
+    {
+        "term":          "<original term>",
+        "suggestion":    "<single alternative word or phrase>",
+        "context_aware": true | false   // true when `context` was used
+        "ad_aware":      true | false   // true when `full_text` was used
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON body required'}), 400
+
+        term      = data.get('term', '').strip()
+        bias_type = data.get('bias_type', '').strip()
+        context   = data.get('context', '').strip()
+        full_text = data.get('full_text', '').strip()
+
+        if not term:
+            return jsonify({'error': 'term field is required'}), 400
+        if bias_type not in ('masculine', 'feminine'):
+            return jsonify({'error': 'bias_type must be "masculine" or "feminine"'}), 400
+
+        # TODO: Insert rule-based dictionary lookup here once validated dictionary
+        # is available. If a match is found, return it and skip the Groq call.
+
+        # ------------------------------------------------------------------
+        # Step 1 — build job-ad structural summary (new full-ad awareness)
+        # ------------------------------------------------------------------
+        ad_summary = ""
+        ad_aware   = False
+
+        if full_text:
+            ad_summary = summarise_job_ad_context(full_text)
+            ad_aware   = bool(ad_summary)
+
+        # ------------------------------------------------------------------
+        # Step 2 — build the suggestion prompt
+        # ------------------------------------------------------------------
+        if bias_type == 'masculine':
+            bias_context_label = 'a masculine-coded word (stereotypically associated with male characteristics)'
+        else:
+            bias_context_label = 'a feminine-coded word (stereotypically associated with female characteristics)'
+
+        # Build the ad-context block that will be injected into the prompt
+        if ad_summary:
+            ad_context_block = (
+                f"\n\nJob advertisement context (for tone and role alignment):\n"
+                f"{ad_summary}\n"
+            )
+        else:
+            ad_context_block = ""
+
+        if context:
+            # Full context-aware path: sentence + optional ad summary
+            user_message = (
+                f"In the following job advertisement, the term '{term}' is {bias_context_label}."
+                f"{ad_context_block}\n"
+                f"Specific sentence: \"{context}\"\n\n"
+                f"Suggest a single best gender-neutral alternative word or short phrase (2-3 words max) that:\n"
+                f"1. Naturally replaces '{term}' in the sentence above\n"
+                f"2. Maintains the original grammar and sentence structure\n"
+                f"3. Preserves the meaning and intent of the job advertisement\n"
+                f"4. Matches the tone and industry context described above\n"
+                f"5. Sounds professional and natural in a Philippine job market context\n\n"
+                f"Reply with ONLY the alternative word or phrase. No explanation, no brackets, no extra text."
+            )
+        else:
+            # Sentence not provided — use ad summary alone if available
+            user_message = (
+                f"The term '{term}' is {bias_context_label}."
+                f"{ad_context_block}\n"
+                f"Suggest a single best gender-neutral alternative word or short phrase "
+                f"for this term in a Philippine job advertisement context. "
+                f"Reply with ONLY the alternative word or phrase, nothing else."
+            )
+
+        # ------------------------------------------------------------------
+        # Step 3 — call Groq
+        # ------------------------------------------------------------------
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expert in gender-neutral and inclusive language for job advertisements "
+                        "in the Philippine job market. "
+                        "Your role is to help rewrite gender-coded language to be more inclusive and fair "
+                        "to all candidates. "
+                        "When a job advertisement summary is provided, use it to ensure your suggestion fits "
+                        "the role, industry, and register of the ad. "
+                        "When a specific sentence is provided, ensure your suggestion slots in grammatically "
+                        "and naturally without changing the meaning of the sentence. "
+                        "You respond with ONLY a single best gender-neutral alternative word or short phrase "
+                        "(2-3 words maximum). "
+                        "No explanation, no numbering, no comma-separated lists, no extra text. "
+                        "Just the single replacement word or phrase only."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": user_message
+                }
+            ],
+            max_tokens=20,
+            temperature=0.3,
+        )
+
+        suggestion = response.choices[0].message.content.strip()
+
+        return jsonify({
+            'term':          term,
+            'suggestion':    suggestion,
+            'context_aware': len(context) > 0,
+            'ad_aware':      ad_aware,
+        }), 200
+
+    except Exception as e:
+        error_type = type(e).__name__
+
+        if error_type == 'RateLimitError':
+            return jsonify({'error': 'Rate limit reached, please try again shortly'}), 429
+        if error_type == 'APIConnectionError':
+            return jsonify({'error': 'Could not reach suggestion service'}), 503
+        if error_type == 'APIStatusError':
+            return jsonify({'error': 'Suggestion service returned an error'}), 502
+
+        print(f"[/suggest] Unexpected error: {error_type}: {str(e)}")
+        return jsonify({'error': 'Suggestion service returned an error'}), 502
 
 
 @app.route('/batch-detect', methods=['POST'])
