@@ -1,8 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:adjust_app/widgets/custom_scrollbar.dart';
+import 'package:adjust_app/widgets/word_suggestions.dart';
 import 'package:adjust_app/services/bias_detection_service.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+// Shared text style constants used by both TextField and RichText.
+// Changing any value here updates both states simultaneously.
+const double _kFontSize = 16.0;
+const double _kLineHeight = 1.45;
+const FontWeight _kFontWeight = FontWeight.w400;
 
 class DetectionPage extends StatefulWidget {
   const DetectionPage({super.key});
@@ -18,6 +28,13 @@ class _DetectionPageState extends State<DetectionPage> {
   String? _error;
   int _hoveredSectionIndex = -1;
 
+  Map<String, String> _suggestions = {};
+  Map<String, bool> _suggestionLoading = {};
+  Map<String, String?> _suggestionErrors = {};
+  String? _hoveredWord;
+
+  late final ValueNotifier<int> _suggestionUpdateNotifier = ValueNotifier(0);
+
   @override
   void initState() {
     super.initState();
@@ -27,6 +44,7 @@ class _DetectionPageState extends State<DetectionPage> {
   @override
   void dispose() {
     _textController.dispose();
+    _suggestionUpdateNotifier.dispose();
     super.dispose();
   }
 
@@ -40,6 +58,10 @@ class _DetectionPageState extends State<DetectionPage> {
     setState(() {
       _isLoading = true;
       _error = null;
+      _suggestions.clear();
+      _suggestionLoading.clear();
+      _suggestionErrors.clear();
+      _hoveredWord = null;
     });
 
     try {
@@ -76,6 +98,242 @@ class _DetectionPageState extends State<DetectionPage> {
     if (raw is List<String>) return raw;
     if (raw is List) return raw.map((e) => e.toString()).toList();
     return [];
+  }
+
+  String _getBiasType(String word) {
+    final masculine = _getWords('masculine');
+    if (masculine.contains(word)) return 'masculine';
+    return 'feminine';
+  }
+
+  String _extractContext(String term) {
+    final text = _textController.text;
+    final textLower = text.toLowerCase();
+    final termLower = term.toLowerCase();
+
+    final termIndex = textLower.indexOf(termLower);
+    if (termIndex == -1) return text;
+
+    int sentenceStart = 0;
+    int sentenceEnd = text.length;
+
+    for (int i = termIndex - 1; i >= 0; i--) {
+      if (text[i] == '.' || text[i] == '!' || text[i] == '?') {
+        sentenceStart = i + 1;
+        break;
+      }
+    }
+
+    for (int i = termIndex + term.length; i < text.length; i++) {
+      if (text[i] == '.' || text[i] == '!' || text[i] == '?') {
+        sentenceEnd = i + 1;
+        break;
+      }
+    }
+
+    String sentence = text.substring(sentenceStart, sentenceEnd).trim();
+
+    if (sentence.split(' ').length < 5 && sentenceStart > 0) {
+      for (int i = sentenceStart - 2; i >= 0; i--) {
+        if (text[i] == '.' || text[i] == '!' || text[i] == '?') {
+          sentence = text.substring(i + 1, sentenceEnd).trim();
+          break;
+        }
+      }
+    }
+
+    return sentence;
+  }
+
+  Future<void> _fetchSuggestion(String term) async {
+    if (_suggestions.containsKey(term)) {
+      _suggestionUpdateNotifier.value++;
+      return;
+    }
+
+    setState(() {
+      _suggestionLoading[term] = true;
+      _suggestionErrors[term] = null;
+    });
+
+    try {
+      final biasType = _getBiasType(term);
+      final context = _extractContext(term);
+
+      final suggestion = await BiasDetectionService.getContextAwareSuggestion(
+        term,
+        biasType,
+        context: context,
+      );
+
+      setState(() {
+        _suggestions[term] = suggestion.suggestion;
+        _suggestionLoading[term] = false;
+        _suggestionUpdateNotifier.value++;
+      });
+    } catch (e) {
+      setState(() {
+        _suggestionLoading[term] = false;
+        _suggestionErrors[term] = 'No suggestion available';
+        _suggestionUpdateNotifier.value++;
+      });
+    }
+  }
+
+  void _acceptSuggestion(String originalWord, String suggestion) {
+    final updatedText = _textController.text.replaceAll(
+      RegExp(r'\b' + RegExp.escape(originalWord) + r'\b'),
+      suggestion,
+    );
+
+    setState(() {
+      _textController.text = updatedText;
+      _hoveredWord = null;
+      _suggestions.clear();
+      _suggestionLoading.clear();
+      _suggestionErrors.clear();
+      _result = null;
+    });
+  }
+
+  void _dismissPopover() {
+    setState(() => _hoveredWord = null);
+  }
+
+  void _showSuggestionPopover(String word) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (context) => ValueListenableBuilder<int>(
+        valueListenable: _suggestionUpdateNotifier,
+        builder: (context, _, __) {
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            child: SuggestionPopover(
+              term: word,
+              suggestion: _suggestions[word],
+              isLoading: _suggestionLoading[word] ?? false,
+              error: _suggestionErrors[word],
+              onAccept: () {
+                Navigator.of(context).pop();
+                _acceptSuggestion(word, _suggestions[word] ?? '');
+              },
+              onDismiss: () => Navigator.of(context).pop(),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildHighlightedTextDisplay() {
+    final text = _textController.text;
+    final textLower = text.toLowerCase();
+    final masculine = _getWords('masculine');
+    final feminine = _getWords('feminine');
+
+    // Plain span style — font weight must be w400 to match untyped TextField
+    // text. Using w500/w600 on plain spans was causing the visual size
+    // difference seen between the two states.
+    final plainStyle = GoogleFonts.poppins(
+      fontSize: _kFontSize,
+      color: const Color(0xFF333333),
+      height: _kLineHeight,
+      fontWeight: _kFontWeight,
+    );
+
+    List<InlineSpan> spans = [];
+    int lastIndex = 0;
+
+    List<MapEntry<int, String>> matches = [];
+
+    for (final word in masculine) {
+      final pattern = RegExp(
+        r'\b' + RegExp.escape(word) + r'\b',
+        caseSensitive: false,
+      );
+      for (final match in pattern.allMatches(textLower)) {
+        matches.add(MapEntry(match.start, word));
+      }
+    }
+
+    for (final word in feminine) {
+      final pattern = RegExp(
+        r'\b' + RegExp.escape(word) + r'\b',
+        caseSensitive: false,
+      );
+      for (final match in pattern.allMatches(textLower)) {
+        matches.add(MapEntry(match.start, word));
+      }
+    }
+
+    matches.sort((a, b) => a.key.compareTo(b.key));
+
+    for (final match in matches) {
+      final startPos = match.key;
+      final wordAtPos = match.value;
+      final endPos = startPos + wordAtPos.length;
+
+      if (startPos < lastIndex) continue;
+
+      if (startPos > lastIndex) {
+        spans.add(TextSpan(
+          text: text.substring(lastIndex, startPos),
+          style: plainStyle,
+        ));
+      }
+
+      final isMasculine = masculine.contains(wordAtPos);
+      final underlineColor = isMasculine
+          ? const Color(0xFFC49FC9)
+          : const Color(0xFFB188B6);
+
+      spans.add(
+        TextSpan(
+          text: text.substring(startPos, endPos),
+          style: GoogleFonts.poppins(
+            fontSize: _kFontSize,
+            color: const Color(0xFF333333),
+            height: _kLineHeight,
+            fontWeight: _kFontWeight,
+            decoration: TextDecoration.underline,
+            decorationColor: underlineColor,
+            decorationThickness: 2.5,
+          ),
+          recognizer: TapGestureRecognizer()
+            ..onTap = () {
+              _hoveredWord = wordAtPos;
+              _fetchSuggestion(wordAtPos);
+              _showSuggestionPopover(wordAtPos);
+            },
+        ),
+      );
+
+      lastIndex = endPos;
+    }
+
+    if (lastIndex < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(lastIndex),
+        style: plainStyle,
+      ));
+    }
+
+    // _kTextPadding replicates TextField's internal content padding so the
+    // text block starts at the same pixel position in both states.
+    // CustomScrollbar + SingleChildScrollView mirrors the TextField scroll
+    // behaviour. SizedBox.expand prevents shrink-wrap height collapse.
+    return CustomScrollbar(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.only(right: 14),
+        child: Text.rich(
+          TextSpan(style: plainStyle, children: spans),
+          textAlign: TextAlign.left,
+          textDirection: TextDirection.ltr,
+        ),
+      ),
+    );
   }
 
   @override
@@ -122,11 +380,21 @@ class _DetectionPageState extends State<DetectionPage> {
                     ),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
+                        if (_result != null) {
+                          return _buildHighlightedTextDisplay();
+                        }
+
                         return CustomScrollbar(
                           child: TextField(
                             controller: _textController,
                             maxLines: null,
                             keyboardType: TextInputType.multiline,
+                            style: GoogleFonts.poppins(
+                              fontSize: _kFontSize,
+                              color: const Color(0xFF333333),
+                              height: _kLineHeight,
+                              fontWeight: _kFontWeight,
+                            ),
                             onTap: () {
                               if (_error != null) {
                                 setState(() => _error = null);
@@ -143,12 +411,16 @@ class _DetectionPageState extends State<DetectionPage> {
                             decoration: InputDecoration(
                               hintText: _error ?? 'Paste your text here',
                               hintStyle: GoogleFonts.poppins(
-                                color: _error != null ? Colors.red : Colors.grey,
-                                fontSize: _error != null ? 14 : 13,
-                                fontWeight: _error != null ? FontWeight.w400 : FontWeight.normal,
+                                color: _error != null
+                                    ? Colors.red
+                                    : Colors.grey,
+                                fontSize: _kFontSize,
+                                fontWeight: _error != null
+                                    ? FontWeight.w400
+                                    : FontWeight.normal,
                               ),
                               border: InputBorder.none,
-                              contentPadding: EdgeInsets.only(right: 20),
+                              contentPadding: const EdgeInsets.only(right: 14),
                             ),
                           ),
                         );
@@ -156,71 +428,49 @@ class _DetectionPageState extends State<DetectionPage> {
                     ),
                   ),
                 ),
+
                 const SizedBox(height: 16),
+
                 Align(
                   alignment: Alignment.center,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _detectBias,
-                    style: ButtonStyle(
-                      padding: MaterialStateProperty.all(
-                        const EdgeInsets.symmetric(
-                            horizontal: 100, vertical: 18),
-                      ),
-                      elevation: MaterialStateProperty.all(4),
-                      backgroundColor:
-                          MaterialStateProperty.resolveWith<Color>((states) {
-                        if (states.contains(MaterialState.disabled)) {
-                          return const Color(0xFFD4B5E8).withOpacity(0.6);
-                        }
-                        return states.contains(MaterialState.hovered)
-                            ? const Color(0xFF3A0E52)
-                            : const Color(0xFFD4B5E8);
-                      }),
-                      foregroundColor:
-                          MaterialStateProperty.resolveWith<Color>((states) =>
-                              states.contains(MaterialState.hovered)
-                                  ? const Color(0xFFD4B5E8)
-                                  : const Color(0xFF280647)),
-                      shape:
-                          MaterialStateProperty.resolveWith<OutlinedBorder>(
-                        (states) => RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                          side: BorderSide(
-                            color: states.contains(MaterialState.hovered)
-                                ? const Color(0xFFD4B5E8)
-                                : const Color(0xFF280647),
-                            width: 2.5,
-                          ),
-                        ),
-                      ),
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Text(
-                            'DETECT',
-                            style: GoogleFonts.poppins(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
+                  child: _result != null
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _buildDetectButton(),
+                            const SizedBox(width: 12),
+                            OutlinedButton(
+                              onPressed: () {
+                                setState(() {
+                                  _result = null;
+                                  _suggestions.clear();
+                                  _suggestionLoading.clear();
+                                  _suggestionErrors.clear();
+                                  _hoveredWord = null;
+                                });
+                              },
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 28, vertical: 18),
+                                side: const BorderSide(
+                                    color: Color(0xFFA984AE), width: 2),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(30),
+                                ),
+                              ),
+                              child: Text(
+                                'EDIT',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: const Color(0xFF280647),
+                                ),
+                              ),
                             ),
-                          ),
-                  ),
+                          ],
+                        )
+                      : _buildDetectButton(),
                 ),
-                // if (_error != null)
-                //   Padding(
-                //     padding: const EdgeInsets.only(top: 12),
-                //     child: Text(
-                //       _error!,
-                //       style: GoogleFonts.poppins(
-                //         color: Colors.red,
-                //         fontSize: 12,
-                //       ),
-                //       textAlign: TextAlign.center,
-                //     ),
-                //   ),
               ],
             ),
           ),
@@ -277,26 +527,42 @@ class _DetectionPageState extends State<DetectionPage> {
                                         centerSpaceRadius: 55,
                                         sections: [
                                           PieChartSectionData(
-                                            value: (_result!.confidenceScores['male_biased'] ?? 0) * 100,
+                                            value: (_result!.confidenceScores[
+                                                        'male_biased'] ??
+                                                    0) *
+                                                100,
                                             color: const Color(0xFFC49FC9),
                                             title: '',
-                                            radius: _hoveredSectionIndex == 0 ? 28 : 20,
+                                            radius: _hoveredSectionIndex == 0
+                                                ? 28
+                                                : 20,
                                           ),
                                           PieChartSectionData(
-                                            value: (_result!.confidenceScores['female_biased'] ?? 0) * 100,
+                                            value: (_result!.confidenceScores[
+                                                        'female_biased'] ??
+                                                    0) *
+                                                100,
                                             color: const Color(0xFFB188B6),
                                             title: '',
-                                            radius: _hoveredSectionIndex == 1 ? 28 : 20,
+                                            radius: _hoveredSectionIndex == 1
+                                                ? 28
+                                                : 20,
                                           ),
                                           PieChartSectionData(
-                                            value: (_result!.confidenceScores['neutral'] ?? 0) * 100,
+                                            value: (_result!.confidenceScores[
+                                                        'neutral'] ??
+                                                    0) *
+                                                100,
                                             color: const Color(0xFF2D3436),
                                             title: '',
-                                            radius: _hoveredSectionIndex == 2 ? 28 : 20,
+                                            radius: _hoveredSectionIndex == 2
+                                                ? 28
+                                                : 20,
                                           ),
                                         ],
                                         borderData: FlBorderData(show: false),
-                                        pieTouchData: PieTouchData(enabled: false),
+                                        pieTouchData:
+                                            PieTouchData(enabled: false),
                                       ),
                                     ),
                                   ),
@@ -356,10 +622,12 @@ class _DetectionPageState extends State<DetectionPage> {
                                       ),
                                       children: [
                                         const TextSpan(
-                                          text: 'the indicated job advertisement is\n',
+                                          text:
+                                              'the indicated job advertisement is\n',
                                         ),
                                         TextSpan(
-                                          text: '${_result!.detectedClass.replaceAll('_', ' ')}.',
+                                          text:
+                                              '${_result!.detectedClass.replaceAll('_', ' ')}.',
                                           style: const TextStyle(
                                             fontWeight: FontWeight.w700,
                                           ),
@@ -402,7 +670,8 @@ class _DetectionPageState extends State<DetectionPage> {
                       _PercentageIndicator(
                         label: 'Male Biased',
                         percentage: _result != null
-                            ? (_result!.confidenceScores['male_biased'] ?? 0) * 100
+                            ? (_result!.confidenceScores['male_biased'] ?? 0) *
+                                100
                             : 0,
                         color: const Color(0xFFC49FC9),
                         isHighlighted: _hoveredSectionIndex == 0,
@@ -415,7 +684,9 @@ class _DetectionPageState extends State<DetectionPage> {
                       _PercentageIndicator(
                         label: 'Female Biased',
                         percentage: _result != null
-                            ? (_result!.confidenceScores['female_biased'] ?? 0) * 100
+                            ? (_result!.confidenceScores['female_biased'] ??
+                                    0) *
+                                100
                             : 0,
                         color: const Color(0xFFB188B6),
                         isHighlighted: _hoveredSectionIndex == 1,
@@ -470,7 +741,59 @@ class _DetectionPageState extends State<DetectionPage> {
       ),
     );
   }
+
+  Widget _buildDetectButton() {
+    return ElevatedButton(
+      onPressed: _isLoading ? null : _detectBias,
+      style: ButtonStyle(
+        padding: MaterialStateProperty.all(
+          const EdgeInsets.symmetric(horizontal: 100, vertical: 18),
+        ),
+        elevation: MaterialStateProperty.all(4),
+        backgroundColor:
+            MaterialStateProperty.resolveWith<Color>((states) {
+          if (states.contains(MaterialState.disabled)) {
+            return const Color(0xFFD4B5E8).withOpacity(0.6);
+          }
+          return states.contains(MaterialState.hovered)
+              ? const Color(0xFF3A0E52)
+              : const Color(0xFFD4B5E8);
+        }),
+        foregroundColor: MaterialStateProperty.resolveWith<Color>(
+          (states) => states.contains(MaterialState.hovered)
+              ? const Color(0xFFD4B5E8)
+              : const Color(0xFF280647),
+        ),
+        shape: MaterialStateProperty.resolveWith<OutlinedBorder>(
+          (states) => RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+            side: BorderSide(
+              color: states.contains(MaterialState.hovered)
+                  ? const Color(0xFFD4B5E8)
+                  : const Color(0xFF280647),
+              width: 2.5,
+            ),
+          ),
+        ),
+      ),
+      child: _isLoading
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Text(
+              'DETECT',
+              style: GoogleFonts.poppins(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+    );
+  }
 }
+
+// ── PERCENTAGE INDICATOR ────────────────────────────────────────────────────
 
 class _PercentageIndicator extends StatelessWidget {
   final String label;
@@ -515,6 +838,8 @@ class _PercentageIndicator extends StatelessWidget {
     );
   }
 }
+
+// ── CODED WORD LIST ─────────────────────────────────────────────────────────
 
 class _CodedWordList extends StatelessWidget {
   final String title;

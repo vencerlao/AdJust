@@ -32,6 +32,26 @@ class BiasDetectionResult {
   }
 }
 
+class GenderNeutralSuggestion {
+  final String term;
+  final String suggestion;
+  final bool contextAware;
+
+  GenderNeutralSuggestion({
+    required this.term,
+    required this.suggestion,
+    required this.contextAware,
+  });
+
+  factory GenderNeutralSuggestion.fromJson(Map<String, dynamic> json) {
+    return GenderNeutralSuggestion(
+      term: json['term'] ?? '',
+      suggestion: json['suggestion'] ?? '',
+      contextAware: json['context_aware'] ?? false,
+    );
+  }
+}
+
 class BiasDetectionService {
   // Change this to your backend URL
   static const String baseUrl = 'http://localhost:5000';
@@ -82,6 +102,44 @@ class BiasDetectionService {
       }
     } catch (e) {
       throw Exception('Failed to batch detect: $e');
+    }
+  }
+
+  /// Get a context-aware gender-neutral suggestion for a biased term
+  /// 
+  /// [term] - The biased word to replace
+  /// [biasType] - Either "masculine" or "feminine"
+  /// [context] - The sentence or surrounding text containing the term (optional)
+  ///
+  /// Returns a suggestion that is grammar and context-aware
+  static Future<GenderNeutralSuggestion> getContextAwareSuggestion(
+    String term,
+    String biasType, {
+    String? context,
+  }) async {
+    try {
+      final requestBody = {
+        'term': term,
+        'bias_type': biasType,
+        if (context != null && context.isNotEmpty) 'context': context,
+      };
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/suggest'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(requestBody),
+          )
+          .timeout(timeout);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return GenderNeutralSuggestion.fromJson(data);
+      } else {
+        throw Exception('Error: ${response.statusCode} - ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Failed to get suggestion: $e');
     }
   }
 
