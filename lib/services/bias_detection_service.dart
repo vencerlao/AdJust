@@ -6,12 +6,14 @@ class BiasDetectionResult {
   final Map<String, double> confidenceScores;
   final Map<String, List<String>> flaggedPhrases;
   final String accuracyNote;
+  final String? modelVersion;
 
   BiasDetectionResult({
     required this.detectedClass,
     required this.confidenceScores,
     required this.flaggedPhrases,
     required this.accuracyNote,
+    this.modelVersion,
   });
 
   factory BiasDetectionResult.fromJson(Map<String, dynamic> json) {
@@ -28,6 +30,7 @@ class BiasDetectionResult {
         ),
       ),
       accuracyNote: json['accuracy_note'] ?? '',
+      modelVersion: json['model_version'],
     );
   }
 }
@@ -46,7 +49,7 @@ class GenderNeutralSuggestion {
   factory GenderNeutralSuggestion.fromJson(Map<String, dynamic> json) {
     return GenderNeutralSuggestion(
       term: json['term'] ?? '',
-      suggestion: json['suggestion'] ?? '',
+      suggestion: json['suggestion']?.toString().toLowerCase() ?? '',
       contextAware: json['context_aware'] ?? false,
     );
   }
@@ -152,6 +155,24 @@ class BiasDetectionService {
       return response.statusCode == 200;
     } catch (e) {
       return false;
+    }
+  }
+
+  /// Get model information from the backend
+  static Future<Map<String, dynamic>> getModelInfo() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/health'))
+          .timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return data['model'] ?? {};
+      } else {
+        throw Exception('Failed to fetch model info: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Failed to get model info: $e');
     }
   }
 }

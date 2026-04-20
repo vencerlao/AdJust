@@ -8,11 +8,10 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-// Shared text style constants used by both TextField and RichText.
-// Changing any value here updates both states simultaneously.
 const double _kFontSize = 16.0;
 const double _kLineHeight = 1.45;
 const FontWeight _kFontWeight = FontWeight.w400;
+const EdgeInsets _kContentPadding = EdgeInsets.only(right: 27);
 
 class DetectionPage extends StatefulWidget {
   const DetectionPage({super.key});
@@ -80,11 +79,11 @@ class _DetectionPageState extends State<DetectionPage> {
 
   Color _getClassColor(String className) {
     switch (className) {
-      case 'male_biased':
+      case 'Male':
         return const Color(0xFFC49FC9);
-      case 'female_biased':
+      case 'Female':
         return const Color(0xFFB188B6);
-      case 'neutral':
+      case 'Neutral':
         return const Color(0xFF2D3436);
       default:
         return Colors.grey;
@@ -227,21 +226,21 @@ class _DetectionPageState extends State<DetectionPage> {
     );
   }
 
+  // Single source of truth for the text style used in both states.
+  TextStyle get _sharedTextStyle => GoogleFonts.poppins(
+        fontSize: _kFontSize,
+        color: const Color(0xFF333333),
+        height: _kLineHeight,
+        fontWeight: _kFontWeight,
+      );
+
   Widget _buildHighlightedTextDisplay() {
     final text = _textController.text;
     final textLower = text.toLowerCase();
     final masculine = _getWords('masculine');
     final feminine = _getWords('feminine');
 
-    // Plain span style — font weight must be w400 to match untyped TextField
-    // text. Using w500/w600 on plain spans was causing the visual size
-    // difference seen between the two states.
-    final plainStyle = GoogleFonts.poppins(
-      fontSize: _kFontSize,
-      color: const Color(0xFF333333),
-      height: _kLineHeight,
-      fontWeight: _kFontWeight,
-    );
+    final plainStyle = _sharedTextStyle;
 
     List<InlineSpan> spans = [];
     int lastIndex = 0;
@@ -285,21 +284,16 @@ class _DetectionPageState extends State<DetectionPage> {
       }
 
       final isMasculine = masculine.contains(wordAtPos);
-      final underlineColor = isMasculine
-          ? const Color(0xFFC49FC9)
-          : const Color(0xFFB188B6);
+      final underlineColor =
+          isMasculine ? const Color(0xFFC49FC9) : const Color(0xFFB188B6);
 
       spans.add(
         TextSpan(
           text: text.substring(startPos, endPos),
-          style: GoogleFonts.poppins(
-            fontSize: _kFontSize,
-            color: const Color(0xFF333333),
-            height: _kLineHeight,
-            fontWeight: _kFontWeight,
+          style: plainStyle.copyWith(
             decoration: TextDecoration.underline,
             decorationColor: underlineColor,
-            decorationThickness: 2.5,
+            decorationThickness: 3.0,
           ),
           recognizer: TapGestureRecognizer()
             ..onTap = () {
@@ -320,17 +314,59 @@ class _DetectionPageState extends State<DetectionPage> {
       ));
     }
 
-    // _kTextPadding replicates TextField's internal content padding so the
-    // text block starts at the same pixel position in both states.
-    // CustomScrollbar + SingleChildScrollView mirrors the TextField scroll
-    // behaviour. SizedBox.expand prevents shrink-wrap height collapse.
-    return CustomScrollbar(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.only(right: 14),
+    // Wrap in SingleChildScrollView to allow proper scrolling within CustomScrollbar
+    // without layout conflicts. This mirrors the TextField approach.
+    return SingleChildScrollView(
+      child: Padding(
+        padding: _kContentPadding,
         child: Text.rich(
           TextSpan(style: plainStyle, children: spans),
           textAlign: TextAlign.left,
           textDirection: TextDirection.ltr,
+          // StrutStyle pins the line-box height to the same value Flutter
+          // uses internally for the TextField, preventing the 1-2 px shift.
+          strutStyle: StrutStyle(
+            fontFamily: plainStyle.fontFamily,
+            fontSize: _kFontSize,
+            height: _kLineHeight,
+            forceStrutHeight: true,
+          ),
+          textWidthBasis: TextWidthBasis.parent,
+        ),
+      ),
+    );
+  }
+
+  // Builds the input TextField, constrained to fill its parent at all times.
+  Widget _buildTextField() {
+    return SingleChildScrollView(
+      // ScrollDirection.vertical by default, allows proper scrolling without conflicts
+      child: TextField(
+        controller: _textController,
+        // Use maxLines instead of expands to let SingleChildScrollView handle sizing
+        maxLines: null,
+        keyboardType: TextInputType.multiline,
+        style: _sharedTextStyle,
+        onTap: () {
+          if (_error != null) setState(() => _error = null);
+        },
+        onChanged: (value) {
+          if (_error != null) setState(() => _error = null);
+          if (value.trim().isEmpty && _result != null) {
+            setState(() => _result = null);
+          }
+        },
+        decoration: InputDecoration(
+          hintText: _error ?? 'Paste your text here',
+          hintStyle: GoogleFonts.poppins(
+            color: _error != null ? Colors.red : Colors.grey,
+            fontSize: _kFontSize,
+            fontWeight: _error != null ? FontWeight.w400 : FontWeight.normal,
+          ),
+          border: InputBorder.none,
+          // Use contentPadding that accounts for CustomScrollbar width
+          contentPadding: _kContentPadding,
+          isDense: false,
         ),
       ),
     );
@@ -356,6 +392,7 @@ class _DetectionPageState extends State<DetectionPage> {
       ),
       child: Row(
         children: [
+          // ── LEFT COLUMN ───────────────────────────────────────────────
           Expanded(
             flex: 10,
             child: Column(
@@ -378,53 +415,12 @@ class _DetectionPageState extends State<DetectionPage> {
                         ),
                       ],
                     ),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        if (_result != null) {
-                          return _buildHighlightedTextDisplay();
-                        }
-
-                        return CustomScrollbar(
-                          child: TextField(
-                            controller: _textController,
-                            maxLines: null,
-                            keyboardType: TextInputType.multiline,
-                            style: GoogleFonts.poppins(
-                              fontSize: _kFontSize,
-                              color: const Color(0xFF333333),
-                              height: _kLineHeight,
-                              fontWeight: _kFontWeight,
-                            ),
-                            onTap: () {
-                              if (_error != null) {
-                                setState(() => _error = null);
-                              }
-                            },
-                            onChanged: (value) {
-                              if (_error != null) {
-                                setState(() => _error = null);
-                              }
-                              if (value.trim().isEmpty && _result != null) {
-                                setState(() => _result = null);
-                              }
-                            },
-                            decoration: InputDecoration(
-                              hintText: _error ?? 'Paste your text here',
-                              hintStyle: GoogleFonts.poppins(
-                                color: _error != null
-                                    ? Colors.red
-                                    : Colors.grey,
-                                fontSize: _kFontSize,
-                                fontWeight: _error != null
-                                    ? FontWeight.w400
-                                    : FontWeight.normal,
-                              ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.only(right: 14),
-                            ),
-                          ),
-                        );
-                      },
+                    // CustomScrollbar wraps both states to provide consistent scrolling
+                    // and appearance. The padding accounts for scrollbar width (13px).
+                    child: CustomScrollbar(
+                      child: _result != null
+                          ? _buildHighlightedTextDisplay()
+                          : _buildTextField(),
                     ),
                   ),
                 ),
@@ -477,6 +473,7 @@ class _DetectionPageState extends State<DetectionPage> {
 
           const SizedBox(width: 10),
 
+          // ── RIGHT COLUMN ──────────────────────────────────────────────
           Expanded(
             flex: 5,
             child: Column(
@@ -528,9 +525,9 @@ class _DetectionPageState extends State<DetectionPage> {
                                         sections: [
                                           PieChartSectionData(
                                             value: (_result!.confidenceScores[
-                                                        'male_biased'] ??
-                                                    0) *
-                                                100,
+                                                            'Male'] ??
+                                                        0) *
+                                                    100,
                                             color: const Color(0xFFC49FC9),
                                             title: '',
                                             radius: _hoveredSectionIndex == 0
@@ -539,9 +536,9 @@ class _DetectionPageState extends State<DetectionPage> {
                                           ),
                                           PieChartSectionData(
                                             value: (_result!.confidenceScores[
-                                                        'female_biased'] ??
-                                                    0) *
-                                                100,
+                                                            'Female'] ??
+                                                        0) *
+                                                    100,
                                             color: const Color(0xFFB188B6),
                                             title: '',
                                             radius: _hoveredSectionIndex == 1
@@ -550,9 +547,9 @@ class _DetectionPageState extends State<DetectionPage> {
                                           ),
                                           PieChartSectionData(
                                             value: (_result!.confidenceScores[
-                                                        'neutral'] ??
-                                                    0) *
-                                                100,
+                                                            'Neutral'] ??
+                                                        0) *
+                                                    100,
                                             color: const Color(0xFF2D3436),
                                             title: '',
                                             radius: _hoveredSectionIndex == 2
@@ -567,9 +564,7 @@ class _DetectionPageState extends State<DetectionPage> {
                                     ),
                                   ),
                                   Text(
-                                    _result!.detectedClass
-                                        .replaceAll('_biased', '')
-                                        .toUpperCase(),
+                                    _result!.detectedClass.toUpperCase(),
                                     style: GoogleFonts.poppins(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w700,
@@ -597,7 +592,7 @@ class _DetectionPageState extends State<DetectionPage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    '${_result!.detectedClass.replaceAll('_', ' ').toUpperCase()} CODED',
+                                    '${_result!.detectedClass.toUpperCase()} CODED',
                                     style: GoogleFonts.poppins(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w800,
@@ -627,7 +622,7 @@ class _DetectionPageState extends State<DetectionPage> {
                                         ),
                                         TextSpan(
                                           text:
-                                              '${_result!.detectedClass.replaceAll('_', ' ')}.',
+                                              '${_result!.detectedClass.toLowerCase()}.',
                                           style: const TextStyle(
                                             fontWeight: FontWeight.w700,
                                           ),
@@ -670,8 +665,7 @@ class _DetectionPageState extends State<DetectionPage> {
                       _PercentageIndicator(
                         label: 'Male Biased',
                         percentage: _result != null
-                            ? (_result!.confidenceScores['male_biased'] ?? 0) *
-                                100
+                            ? (_result!.confidenceScores['Male'] ?? 0) * 100
                             : 0,
                         color: const Color(0xFFC49FC9),
                         isHighlighted: _hoveredSectionIndex == 0,
@@ -684,9 +678,7 @@ class _DetectionPageState extends State<DetectionPage> {
                       _PercentageIndicator(
                         label: 'Female Biased',
                         percentage: _result != null
-                            ? (_result!.confidenceScores['female_biased'] ??
-                                    0) *
-                                100
+                            ? (_result!.confidenceScores['Female'] ?? 0) * 100
                             : 0,
                         color: const Color(0xFFB188B6),
                         isHighlighted: _hoveredSectionIndex == 1,
@@ -699,7 +691,7 @@ class _DetectionPageState extends State<DetectionPage> {
                       _PercentageIndicator(
                         label: 'Neutral',
                         percentage: _result != null
-                            ? (_result!.confidenceScores['neutral'] ?? 0) * 100
+                            ? (_result!.confidenceScores['Neutral'] ?? 0) * 100
                             : 0,
                         color: const Color(0xFF2D3436),
                         isHighlighted: _hoveredSectionIndex == 2,
@@ -722,6 +714,7 @@ class _DetectionPageState extends State<DetectionPage> {
                         child: _CodedWordList(
                           title: 'Masculine Coded Words',
                           words: _getWords('masculine'),
+                          bulletColor: const Color(0xFFC49FC9),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -729,6 +722,7 @@ class _DetectionPageState extends State<DetectionPage> {
                         child: _CodedWordList(
                           title: 'Feminine Coded Words',
                           words: _getWords('feminine'),
+                          bulletColor: const Color(0xFFB188B6),
                         ),
                       ),
                     ],
@@ -844,10 +838,12 @@ class _PercentageIndicator extends StatelessWidget {
 class _CodedWordList extends StatelessWidget {
   final String title;
   final List<String> words;
+  final Color bulletColor;
 
   const _CodedWordList({
     required this.title,
     required this.words,
+    required this.bulletColor,
   });
 
   @override
@@ -894,17 +890,37 @@ class _CodedWordList extends StatelessWidget {
                   )
                 : CustomScrollbar(
                     child: ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
                       itemCount: words.length,
                       itemBuilder: (context, index) {
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Text(
-                            words[index],
-                            style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              color: const Color(0xFF333333),
-                              fontWeight: FontWeight.w500,
-                            ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              // Filled circle bullet colored to match the
+                              // gender category of the list.
+                              Container(
+                                width: 6,
+                                height: 6,
+                                margin: const EdgeInsets.only(right: 8),
+                                decoration: BoxDecoration(
+                                  color: bulletColor,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  words[index],
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: const Color(0xFF333333),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         );
                       },
