@@ -48,3 +48,8 @@ app.*.map.json
 .env
 .env.local
 .env.*.local
+
+# Model files
+backend/models/config.json
+label_encoder.pkl
+random_forest.pkl
