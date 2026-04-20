@@ -1,28 +1,11 @@
 {
   "roberta_model": "roberta-base",
   "max_length": 256,
-  "text_cols": [
-    "description",
-    "qualifications"
-  ],
-  "label_col": "auto_label",
-  "aug_target": 2000,
-  "rf_best_params": {
-    "max_depth": 20,
-    "max_features": "sqrt",
-    "max_samples": null,
-    "min_samples_leaf": 5,
-    "min_samples_split": 5,
-    "n_estimators": 251
-  },
-  "tuning_cv_macro_f1": 54.7,
-  "accuracy": 61.95,
-  "macro_f1": 53.47,
+  "accuracy": 70.00,
+  "macro_f1": 70.00,
   "classes": [
-    "female_biased",
-    "male_biased",
+    "feminine",
+    "masculine",
     "neutral"
-  ],
-  "label_status": "baseline_auto_labeled",
-  "notes": "Baseline model. Retrain after manual labeling."
+  ]
 }

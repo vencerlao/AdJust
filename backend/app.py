@@ -5,6 +5,7 @@ Integrates Random Forest for bias classification
 import os
 import json
 import pickle
+import joblib
 import numpy as np
 import re
 from flask import Flask, request, jsonify
@@ -26,13 +27,31 @@ config_path = os.path.join(os.path.dirname(__file__), 'models', 'config.json')
 with open(config_path, 'r') as f:
     config = json.load(f)
 
+print(f"[Model Config] Loaded configuration from {config_path}")
+print(f"  - RoBERTa Model: {config.get('roberta_model', 'N/A')}")
+print(f"  - Max Length: {config.get('max_length', 'N/A')}")
+print(f"  - Classes: {config.get('classes', [])}")
+print(f"  - Accuracy: {config.get('accuracy', 'N/A')}%")
+print(f"  - Macro F1: {config.get('macro_f1', 'N/A')}%")
+
 # Load model artifacts
 model_dir = os.path.join(os.path.dirname(__file__), 'models')
 with open(os.path.join(model_dir, 'label_encoder.pkl'), 'rb') as f:
     label_encoder = pickle.load(f)
+print(f"[Model] Label encoder loaded with classes: {list(label_encoder.classes_)}")
 
-with open(os.path.join(model_dir, 'random_forest.pkl'), 'rb') as f:
-    rf_model = pickle.load(f)
+# Create class name mapping to normalize encoder output to frontend-compatible format
+# The new label encoder uses lowercase names, but frontend expects capitalized names
+CLASS_NAME_MAPPING = {
+    'feminine': 'Female',
+    'masculine': 'Male',
+    'neutral': 'Neutral',
+}
+
+rf_model = joblib.load(os.path.join(model_dir, 'random_forest.pkl'))
+print(f"[Model] Random Forest model loaded successfully (400 estimators)")
+print(f"[Model] Label encoder classes: {list(label_encoder.classes_)}")
+print(f"[Model] Class name mapping enabled for frontend compatibility")
 
 # Try to load transformers for RoBERTa embeddings
 try:
@@ -43,10 +62,10 @@ try:
     roberta_model = RobertaModel.from_pretrained(config['roberta_model'])
     roberta_model.eval()
     ROBERTA_LOADED = True
-    print("✓ RoBERTa loaded successfully")
+    print("[OK] RoBERTa loaded successfully")
 except Exception as e:
     ROBERTA_LOADED = False
-    print(f"⚠ RoBERTa not available: {e}")
+    print(f"[WARN] RoBERTa not available: {e}")
     print("  Using TF-IDF fallback for embeddings")
 
 
@@ -66,6 +85,7 @@ def get_embeddings(text, max_length=256):
                 outputs = roberta_model(**inputs)
                 embeddings = outputs.last_hidden_state[:, 0, :].numpy().flatten()
 
+            # Trim or pad to exactly 770 dimensions (RF model expects 770 features)
             if len(embeddings) < 770:
                 embeddings = np.pad(embeddings, (0, 770 - len(embeddings)), 'constant')
             elif len(embeddings) > 770:
@@ -260,8 +280,17 @@ def summarise_job_ad_context(full_text: str) -> str:
 def health():
     return jsonify({
         'status': 'ok',
-        'model': config.get('label_status', 'baseline'),
-        'classes': config.get('classes', []),
+        'model': {
+            'roberta': config.get('roberta_model', 'N/A'),
+            'classes': config.get('classes', []),
+            'accuracy': config.get('accuracy', 'N/A'),
+            'macro_f1': config.get('macro_f1', 'N/A'),
+            'tuning_cv_macro_f1': config.get('tuning_cv_macro_f1', 'N/A'),
+        },
+        'label_encoder': {
+            'classes': list(label_encoder.classes_),
+            'n_classes': len(label_encoder.classes_),
+        },
     })
 
 
@@ -272,8 +301,8 @@ def detect_bias():
 
     Request:  { "text": "..." }
     Response: {
-        "detected_class": "male_biased"|"female_biased"|"neutral",
-        "confidence_scores": {"male_biased": 0.0, "female_biased": 0.0, "neutral": 0.0},
+        "detected_class": "Male"|"Female"|"Neutral",
+        "confidence_scores": {"Male": 0.0, "Female": 0.0, "Neutral": 0.0},
         "flagged_phrases": {"masculine": [...], "feminine": [...]},
         "accuracy_note": "..."
     }
@@ -290,13 +319,16 @@ def detect_bias():
         embeddings = get_embeddings(text, max_length=config['max_length'])
 
         predicted_class_idx = rf_model.predict([embeddings])[0]
-        predicted_class = label_encoder.inverse_transform([predicted_class_idx])[0]
+        predicted_class_raw = label_encoder.inverse_transform([predicted_class_idx])[0]
+        predicted_class = CLASS_NAME_MAPPING.get(predicted_class_raw, predicted_class_raw)
 
         probabilities = rf_model.predict_proba([embeddings])[0]
-        confidence_scores = {
-            label_encoder.inverse_transform([i])[0]: float(prob)
-            for i, prob in enumerate(probabilities)
-        }
+        
+        # Build confidence_scores with all classes in consistent order
+        confidence_scores = {}
+        for i, raw_class_name in enumerate(label_encoder.classes_):
+            mapped_class_name = CLASS_NAME_MAPPING.get(raw_class_name, raw_class_name)
+            confidence_scores[mapped_class_name] = float(probabilities[i])
 
         flagged_phrases = extract_flagged_phrases(text)
 
@@ -304,7 +336,7 @@ def detect_bias():
             'detected_class': predicted_class,
             'confidence_scores': confidence_scores,
             'flagged_phrases': flagged_phrases,
-            'accuracy_note': f"Baseline model accuracy: {config.get('accuracy', 'n/a')}%",
+            'accuracy_note': f"Model Accuracy: {config.get('accuracy', 'N/A')}%, Macro F1: {config.get('macro_f1', 'N/A')}%",
         }), 200
 
     except Exception as e:
@@ -452,6 +484,8 @@ def suggest_alternative():
         )
 
         suggestion = response.choices[0].message.content.strip()
+        suggestion = suggestion.strip('"').strip("'").strip()
+        suggestion = suggestion.rstrip('.!,?').strip().lower()
 
         return jsonify({
             'term':          term,
@@ -499,13 +533,16 @@ def batch_detect():
 
             embeddings = get_embeddings(text, max_length=config['max_length'])
             predicted_class_idx = rf_model.predict([embeddings])[0]
-            predicted_class = label_encoder.inverse_transform([predicted_class_idx])[0]
+            predicted_class_raw = label_encoder.inverse_transform([predicted_class_idx])[0]
+            predicted_class = CLASS_NAME_MAPPING.get(predicted_class_raw, predicted_class_raw)
 
             probabilities = rf_model.predict_proba([embeddings])[0]
-            confidence_scores = {
-                label_encoder.inverse_transform([i])[0]: float(prob)
-                for i, prob in enumerate(probabilities)
-            }
+            
+            # Build confidence_scores with all classes in consistent order
+            confidence_scores = {}
+            for i, raw_class_name in enumerate(label_encoder.classes_):
+                mapped_class_name = CLASS_NAME_MAPPING.get(raw_class_name, raw_class_name)
+                confidence_scores[mapped_class_name] = float(probabilities[i])
 
             flagged_phrases = extract_flagged_phrases(text)
 
