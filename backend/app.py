@@ -8,10 +8,13 @@ import pickle
 import joblib
 import numpy as np
 import re
+import csv
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 from groq import Groq
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+analyzer = SentimentIntensityAnalyzer()
 
 app = Flask(__name__)
 CORS(app)
@@ -49,9 +52,36 @@ CLASS_NAME_MAPPING = {
 }
 
 rf_model = joblib.load(os.path.join(model_dir, 'random_forest.pkl'))
-print(f"[Model] Random Forest model loaded successfully (400 estimators)")
+print(f"[Model] Random Forest model loaded successfully ({rf_model.n_estimators} estimators)")
+print(f"[Model] Expects {rf_model.n_features_in_} features from embeddings")
 print(f"[Model] Label encoder classes: {list(label_encoder.classes_)}")
 print(f"[Model] Class name mapping enabled for frontend compatibility")
+
+# ─────────────────────────────────────────────────────────────────────────
+# Load validated word dictionary for instant, context-free lookups
+# ─────────────────────────────────────────────────────────────────────────
+WORD_DICTIONARY = {}  # word (lowercase) → {'label': 'masculine'|'feminine'|'neutral', 'source': str}
+dict_path = os.path.join(model_dir, 'data_dictionary.csv')
+
+if os.path.exists(dict_path):
+    try:
+        with open(dict_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                word = row.get('word', '').strip().lower()
+                label = row.get('label', '').strip().lower()
+                source = row.get('source', '').strip()
+                if word and label in ('masculine', 'feminine', 'neutral'):
+                    WORD_DICTIONARY[word] = {
+                        'label': label,
+                        'source': source,
+                    }
+        print(f"[Dictionary] Loaded {len(WORD_DICTIONARY)} words from validated dictionary")
+    except Exception as e:
+        print(f"[Dictionary] Error loading dictionary: {e}")
+        WORD_DICTIONARY = {}
+else:
+    print(f"[Dictionary] Dictionary file not found at {dict_path}")
 
 # Try to load transformers for RoBERTa embeddings
 try:
@@ -69,8 +99,10 @@ except Exception as e:
     print("  Using TF-IDF fallback for embeddings")
 
 
-def get_embeddings(text, max_length=256):
-    """Generate embeddings using RoBERTa if available, else TF-IDF."""
+def get_embeddings(text, max_length=512):
+    """Generate embeddings matching the training pipeline exactly:
+       768-dim mean-pooled RoBERTa + norm_token_length + VADER compound = 770
+    """
     if ROBERTA_LOADED:
         try:
             import torch
@@ -78,22 +110,24 @@ def get_embeddings(text, max_length=256):
                 inputs = tokenizer(
                     text,
                     max_length=max_length,
-                    padding='max_length',
+                    padding=True,
                     truncation=True,
                     return_tensors='pt'
                 )
                 outputs = roberta_model(**inputs)
-                embeddings = outputs.last_hidden_state[:, 0, :].numpy().flatten()
 
-            # Trim or pad to exactly 770 dimensions (RF model expects 770 features)
-            if len(embeddings) < 770:
-                embeddings = np.pad(embeddings, (0, 770 - len(embeddings)), 'constant')
-            elif len(embeddings) > 770:
-                embeddings = embeddings[:770]
+                mask = inputs["attention_mask"].unsqueeze(-1).float()
+                embedding = (outputs.last_hidden_state * mask).sum(1) / mask.sum(1)
+                embedding = embedding.numpy().flatten()  # 768-dim
 
-            return embeddings
+            tokens   = text.split()
+            norm_len = min(len(tokens), max_length) / max_length
+            compound = analyzer.polarity_scores(text)["compound"]
+
+            return np.concatenate([embedding, [norm_len, compound]])
+
         except Exception as e:
-            print(f"Error generating RoBERTa embeddings: {e}")
+            print(f"Error generating embeddings: {e}")
             return _generate_tfidf_embeddings(text)
     else:
         return _generate_tfidf_embeddings(text)
@@ -118,88 +152,37 @@ def _generate_tfidf_embeddings(text, dim=770):
 
 
 # ---------------------------------------------------------------------------
-# Gender-coded keyword lists
-# Sources: Gaucher et al. (2011), Textio gender tone research,
-#          Ongley (2016) masculine/feminine word banks, and
-#          common patterns observed in Philippine job advertisements.
+# Gender-coded keyword sets — derived directly from the validated
+# data_dictionary.csv so that flagging always aligns with the training data.
+# Sources: Gaucher et al. (2011), EIGE Toolkit (2019), MCWC, UNDP WACA (2024),
+#          Gender-Fair Language Primer — Kintanar (1998), BIAS Word Inventory
+#          — Konnikov et al. (2022), LinkedIn Talent Solutions / Cpl HR,
+#          BUCGAD Feedback, and common Philippine job advertisement patterns.
 # ---------------------------------------------------------------------------
 
-_FEMININE_KEYWORDS = [
-    # Pronouns / explicit gendered references
-    "she", "her", "girl", "woman", "women", "female", "mother", "lady", "gal",
-    # Stereotypically feminine job titles
-    "nurse", "secretary", "receptionist", "housekeeper", "caregiver",
-    "nanny", "midwife", "stewardess",
-    # Appearance
-    "beautiful", "pretty", "attractive", "gorgeous", "lovely", "presentable",
-    # Communal / relational traits (Gaucher et al.)
-    "emotional", "sensitive", "nurturing", "caring", "compassionate",
-    "empathetic", "empathy", "understanding", "patient", "warm", "kind",
-    "gentle", "loyal", "supportive", "cheerful", "pleasant", "friendly",
-    "tactful", "intuitive", "enthusiastic", "passionate",
-    "dedicated", "committed", "commitment", "trustworthy", "honest",
-    "humble", "sincere", "cooperative", "accommodating", "helpful",
-    # Collaboration / communication language
-    "collaborate", "collaboration", "collaborative", "communicate",
-    "communication", "interpersonal", "team player", "teamwork",
-    "community", "relationship", "networking", "social", "connect",
-    "connection", "inclusive", "inclusion", "diversity", "belonging",
-    "together", "collective", "harmony", "consensus",
-    # Organisational / support traits
-    "organized", "organised", "detail-oriented", "attention to detail",
-    "flexible", "adaptable", "multitask", "multitasking",
-    "responsive", "responsible", "reliable", "dependable",
-    # Empowerment / positive culture language
-    "empower", "empowered", "empowerment", "celebrate", "encourage",
-    "respect", "contribution", "contribute", "positive",
-    "support", "mentor", "mentoring", "service",
-]
+_MASCULINE_KEYWORDS = {
+    word for word, entry in WORD_DICTIONARY.items()
+    if entry['label'] == 'masculine'
+}
 
-_MASCULINE_KEYWORDS = [
-    # Pronouns / explicit gendered references
-    "he", "him", "boy", "man", "men", "male", "gentleman", "guy", "bloke", "father",
-    # Agentic / assertive traits (Gaucher et al.)
-    "aggressive", "assertive", "competitive", "ambitious", "driven",
-    "dominant", "commanding", "forceful", "authoritative", "bold",
-    "confident", "fearless", "tough", "strong", "robust", "powerful",
-    "independent", "decisive", "determined", "persistent",
-    # Analytical / technical traits
-    "logical", "analytical", "analysis", "strategic", "strategy",
-    "technical", "expert", "master", "intelligent", "brilliant",
-    "sharp", "clever", "smart", "skilled", "experienced",
-    "proficient", "proficiency", "excellent", "superior", "outstanding",
-    # Leadership / hierarchy language
-    "lead", "leader", "leadership", "manage", "management", "manager",
-    "executive", "director", "senior", "officer", "supervisor",
-    "head", "chief", "principal", "superintendent", "coordinator",
-    "oversee", "administer", "administration", "administrative",
-    "operations", "operational", "authority",
-    # Performance / achievement language
-    "achieve", "achievement", "perform", "performance", "deliver",
-    "results", "target", "objective", "goal-oriented",
-    "drive", "pioneer", "champion", "spearhead", "execute",
-    "exceed", "outperform", "maximize", "optimise", "optimize",
-    # Self-reliant / individual-focus language
-    "self-starter", "self-motivated", "entrepreneurial",
-    "ninja", "rockstar", "guru", "wizard",
-    # High-pressure language
-    "complex", "fast-paced", "demanding", "rigorous", "challenging",
-    # Technical/engineering stereotypes
-    "engineer", "developer", "architect", "programmer",
-    "analyst", "scientist", "technician",
-]
+_FEMININE_KEYWORDS = {
+    word for word, entry in WORD_DICTIONARY.items()
+    if entry['label'] == 'feminine'
+}
+
+print(f"[Keywords] Masculine keywords loaded: {len(_MASCULINE_KEYWORDS)}")
+print(f"[Keywords] Feminine keywords loaded: {len(_FEMININE_KEYWORDS)}")
 
 
 def extract_flagged_phrases(text: str) -> dict:
     """
-    Extract gender-coded words from text.
+    Extract gender-coded words from text using the validated data dictionary.
 
     Matching strategy:
-    - Multi-word phrases: substring search (the phrase itself prevents false positives).
-    - Single words ending in common inflection suffixes: substring search so that
-      e.g. "manage" catches "management", "manages", "managing".
-    - All other single words: word-boundary regex to avoid partial hits
-      (e.g. "her" should not match "here" or "other").
+    - Multi-word phrases (with spaces): substring search — exact phrase match
+    - Dashed compounds (with dashes): substring search — exact phrase match
+    - Single words: ALWAYS word-boundary regex to prevent false positives
+      (e.g. 'he' must not match in 'the', 'where', 'other', 'there')
 
     Returns:
         {"masculine": ["word1", ...], "feminine": ["word1", ...]}
@@ -213,10 +196,13 @@ def extract_flagged_phrases(text: str) -> dict:
     )
 
     def _matches(keyword: str) -> bool:
-        if ' ' in keyword:
+        # Multi-word phrases or dashed compounds: use substring matching
+        # (the phrase structure itself prevents false matches)
+        if ' ' in keyword or '-' in keyword:
             return keyword in text_lower
-        if keyword.endswith(('e', 'al', 'ion', 'ive', 'ment', 'ence', 'ance')):
-            return keyword in text_lower
+
+        # Single words: ALWAYS use strict word boundary matching
+        # This prevents "he" from matching in "the", "where", etc.
         pattern = r'\b' + re.escape(keyword) + r'\b'
         return bool(re.search(pattern, text_lower))
 
@@ -272,6 +258,133 @@ def summarise_job_ad_context(full_text: str) -> str:
         return ""
 
 
+def lookup_dictionary_suggestion(term: str, bias_type: str) -> str | None:
+    """
+    Check if a biased term exists in the validated word dictionary.
+
+    Returns a neutral alternative if found, None otherwise.
+    Uses common-sense neutral replacements based on the word's bias type.
+
+    Args:
+        term: The potentially biased word to look up
+        bias_type: 'masculine' or 'feminine'
+
+    Returns:
+        A neutral alternative word/phrase if found in dictionary and matches bias_type,
+        None if not found or doesn't match bias_type
+    """
+    term_lower = term.lower()
+
+    if term_lower not in WORD_DICTIONARY:
+        return None
+
+    entry = WORD_DICTIONARY[term_lower]
+
+    # Only return a dictionary suggestion if it matches the detected bias type
+    if entry['label'] != bias_type:
+        return None
+
+    # Map biased words to their neutral alternatives
+    # These are common, validated neutral replacements
+    neutral_alternatives = {
+        # Masculine-coded words → neutral
+        'assertive': 'confident',
+        'aggressive': 'proactive',
+        'ambitious': 'goal-oriented',
+        'analytical': 'analytical-minded',
+        'active': 'engaged',
+        'boast': 'highlight achievements',
+        'businessman': 'business professional',
+        'cameraman': 'camera operator',
+        'chairman': 'chairperson',
+        'challenging': 'engaging',
+        'confident': 'assured',
+        'decisive': 'clear-thinking',
+        'determine': 'establish',
+        'determined': 'committed',
+        'dominance': 'leadership',
+        'dominate': 'lead',
+        'lead': 'guide',
+        'driving': 'motivated',
+        'dynamic': 'energetic',
+        'expert': 'specialist',
+        'fireman': 'firefighter',
+        'forceful': 'persuasive',
+        'guy': 'person',
+        'he': 'they',
+        'his': 'their',
+        'him': 'them',
+        'himself': 'themselves',
+        'independent': 'self-reliant',
+        'logical': 'systematic',
+        'masculine': 'inclusive',
+        'master': 'expert',
+        'must': 'should',
+        'operator': 'specialist',
+        'penetrate': 'enter',
+        'pioneer': 'innovator',
+        'powerful': 'impactful',
+        'rocket': 'high-performer',
+        'skilled': 'capable',
+        'smart': 'intelligent',
+        'strength': 'capability',
+        'strong': 'capable',
+        'tackle': 'address',
+        'tough': 'resilient',
+        'warrior': 'fighter',
+        'ninja': 'expert',
+        'rockstar': 'top performer',
+        'guru': 'specialist',
+        'wizard': 'expert',
+        'fast-paced': 'dynamic',
+        'self-starter': 'motivated professional',
+        'self-motivated': 'self-directed',
+        # Feminine-coded words → neutral
+        'affectionate': 'warm',
+        'agreeable': 'cooperative',
+        'caring': 'supportive',
+        'considerate': 'thoughtful',
+        'compassion': 'empathy',
+        'compassionate': 'empathetic',
+        'devoted': 'committed',
+        'emotional': 'expressive',
+        'empathetic': 'understanding',
+        'feminine': 'inclusive',
+        'friendly': 'approachable',
+        'gentle': 'tactful',
+        'grateful': 'appreciative',
+        'herself': 'themselves',
+        'her': 'their',
+        'honest': 'truthful',
+        'humble': 'modest',
+        'interpersonal': 'collaborative',
+        'kind': 'considerate',
+        'lady': 'person',
+        'lovely': 'pleasant',
+        'maternal': 'nurturing',
+        'modest': 'humble',
+        'nurturing': 'supportive',
+        'secretary': 'administrative professional',
+        'sensitive': 'perceptive',
+        'she': 'they',
+        'sociable': 'friendly',
+        'soft-spoken': 'measured',
+        'supporting': 'collaborative',
+        'supportive': 'helpful',
+        'warm': 'approachable',
+        'woman': 'person',
+        'women': 'people',
+        # Feminine-coded dashed words → neutral
+        'family-oriented': 'community-focused',
+        'people-oriented': 'people-focused',
+        'service-oriented': 'service-focused',
+        'harmony-focused': 'collaboration-focused',
+        'detail-oriented': 'detail-focused',
+    }
+
+    return neutral_alternatives.get(term_lower)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -290,6 +403,11 @@ def health():
         'label_encoder': {
             'classes': list(label_encoder.classes_),
             'n_classes': len(label_encoder.classes_),
+        },
+        'dictionary': {
+            'total_words': len(WORD_DICTIONARY),
+            'masculine_keywords': len(_MASCULINE_KEYWORDS),
+            'feminine_keywords': len(_FEMININE_KEYWORDS),
         },
     })
 
@@ -323,7 +441,7 @@ def detect_bias():
         predicted_class = CLASS_NAME_MAPPING.get(predicted_class_raw, predicted_class_raw)
 
         probabilities = rf_model.predict_proba([embeddings])[0]
-        
+
         # Build confidence_scores with all classes in consistent order
         confidence_scores = {}
         for i, raw_class_name in enumerate(label_encoder.classes_):
@@ -331,6 +449,27 @@ def detect_bias():
             confidence_scores[mapped_class_name] = float(probabilities[i])
 
         flagged_phrases = extract_flagged_phrases(text)
+
+        # ------------------------------------------------------------------
+        # Post-processing override: if the model predicts Male/Female but
+        # no corresponding keywords are flagged, and Neutral score is
+        # reasonably competitive, override the classification to Neutral.
+        # This corrects cases where the RF model over-relies on embeddings
+        # for terms that have been reclassified as neutral in the dictionary.
+        # ------------------------------------------------------------------
+        masculine_count = len(flagged_phrases['masculine'])
+        feminine_count  = len(flagged_phrases['feminine'])
+        neutral_score   = confidence_scores.get('Neutral', 0)
+
+        if (predicted_class == 'Male'
+                and masculine_count == 0
+                and neutral_score > 0.25):
+            predicted_class = 'Neutral'
+
+        elif (predicted_class == 'Female'
+                and feminine_count == 0
+                and neutral_score > 0.25):
+            predicted_class = 'Neutral'
 
         return jsonify({
             'detected_class': predicted_class,
@@ -354,7 +493,7 @@ def suggest_alternative():
         "term":      "<biased word>",
         "bias_type": "masculine" | "feminine",
         "context":   "<the specific sentence containing the term>",   # optional but recommended
-        "full_text": "<entire job advertisement text>"                 # NEW — enables full-ad awareness
+        "full_text": "<entire job advertisement text>"                 # enables full-ad awareness
     }
 
     How full-ad context works
@@ -371,15 +510,14 @@ def suggest_alternative():
       • is idiomatic within the Philippine job market
       • slots in grammatically inside the specific sentence (`context` field)
 
-    If `full_text` is absent the endpoint falls back to the previous
-    sentence-only behaviour.
+    If `full_text` is absent the endpoint falls back to sentence-only behaviour.
 
     Response:
     {
         "term":          "<original term>",
         "suggestion":    "<single alternative word or phrase>",
-        "context_aware": true | false   // true when `context` was used
-        "ad_aware":      true | false   // true when `full_text` was used
+        "context_aware": true | false,
+        "ad_aware":      true | false
     }
     """
     try:
@@ -397,11 +535,22 @@ def suggest_alternative():
         if bias_type not in ('masculine', 'feminine'):
             return jsonify({'error': 'bias_type must be "masculine" or "feminine"'}), 400
 
-        # TODO: Insert rule-based dictionary lookup here once validated dictionary
-        # is available. If a match is found, return it and skip the Groq call.
+        # ------------------------------------------------------------------
+        # Step 1 — Check validated dictionary for instant lookup
+        # ------------------------------------------------------------------
+        dict_suggestion = lookup_dictionary_suggestion(term, bias_type)
+        if dict_suggestion:
+            print(f"[/suggest] Dictionary hit for '{term}' ({bias_type}) → '{dict_suggestion}'")
+            return jsonify({
+                'term':          term,
+                'suggestion':    dict_suggestion,
+                'context_aware': len(context) > 0,
+                'ad_aware':      False,
+                'source':        'validated_dictionary',
+            }), 200
 
         # ------------------------------------------------------------------
-        # Step 1 — build job-ad structural summary (new full-ad awareness)
+        # Step 2 — Fall back to Groq for words not in dictionary
         # ------------------------------------------------------------------
         ad_summary = ""
         ad_aware   = False
@@ -411,14 +560,13 @@ def suggest_alternative():
             ad_aware   = bool(ad_summary)
 
         # ------------------------------------------------------------------
-        # Step 2 — build the suggestion prompt
+        # Step 3 — Build the suggestion prompt
         # ------------------------------------------------------------------
         if bias_type == 'masculine':
             bias_context_label = 'a masculine-coded word (stereotypically associated with male characteristics)'
         else:
             bias_context_label = 'a feminine-coded word (stereotypically associated with female characteristics)'
 
-        # Build the ad-context block that will be injected into the prompt
         if ad_summary:
             ad_context_block = (
                 f"\n\nJob advertisement context (for tone and role alignment):\n"
@@ -428,31 +576,31 @@ def suggest_alternative():
             ad_context_block = ""
 
         if context:
-            # Full context-aware path: sentence + optional ad summary
             user_message = (
                 f"In the following job advertisement, the term '{term}' is {bias_context_label}."
                 f"{ad_context_block}\n"
                 f"Specific sentence: \"{context}\"\n\n"
-                f"Suggest a single best gender-neutral alternative word or short phrase (2-3 words max) that:\n"
-                f"1. Naturally replaces '{term}' in the sentence above\n"
-                f"2. Maintains the original grammar and sentence structure\n"
-                f"3. Preserves the meaning and intent of the job advertisement\n"
-                f"4. Matches the tone and industry context described above\n"
-                f"5. Sounds professional and natural in a Philippine job market context\n\n"
-                f"Reply with ONLY the alternative word or phrase. No explanation, no brackets, no extra text."
+                f"Carefully consider the context and suggest ONE best gender-neutral alternative word or short phrase (2-3 words max) that:\n"
+                f"1. Can directly replace '{term}' in the sentence above\n"
+                f"2. Maintains the exact grammar and sentence structure (same part of speech)\n"
+                f"3. Preserves the meaning, tone, and professional intent\n"
+                f"4. Matches the industry context and register of the job ad\n"
+                f"5. Is natural and professional in a Philippine job market context\n"
+                f"6. Does NOT repeat the original term '{term}' or use it as part of the suggestion\n\n"
+                f"Output ONLY the alternative word or phrase. No explanation, no justification, no extra text."
             )
         else:
-            # Sentence not provided — use ad summary alone if available
             user_message = (
                 f"The term '{term}' is {bias_context_label}."
                 f"{ad_context_block}\n"
-                f"Suggest a single best gender-neutral alternative word or short phrase "
+                f"Suggest ONE single best gender-neutral alternative word or short phrase (2-3 words max) "
                 f"for this term in a Philippine job advertisement context. "
-                f"Reply with ONLY the alternative word or phrase, nothing else."
+                f"The suggestion must NOT repeat the original term '{term}'.\n"
+                f"Output ONLY the alternative word or phrase, nothing else."
             )
 
         # ------------------------------------------------------------------
-        # Step 3 — call Groq
+        # Step 4 — Call Groq for final suggestion
         # ------------------------------------------------------------------
         response = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -461,17 +609,15 @@ def suggest_alternative():
                     "role": "system",
                     "content": (
                         "You are an expert in gender-neutral and inclusive language for job advertisements "
-                        "in the Philippine job market. "
-                        "Your role is to help rewrite gender-coded language to be more inclusive and fair "
-                        "to all candidates. "
-                        "When a job advertisement summary is provided, use it to ensure your suggestion fits "
-                        "the role, industry, and register of the ad. "
-                        "When a specific sentence is provided, ensure your suggestion slots in grammatically "
-                        "and naturally without changing the meaning of the sentence. "
-                        "You respond with ONLY a single best gender-neutral alternative word or short phrase "
-                        "(2-3 words maximum). "
-                        "No explanation, no numbering, no comma-separated lists, no extra text. "
-                        "Just the single replacement word or phrase only."
+                        "in the Philippine job market. You specialize in:"
+                        "\n1. Understanding the context and tone of each job ad\n"
+                        "2. Selecting alternatives that match part of speech and grammar\n"
+                        "3. Ensuring suggestions are never repetitive or derivative of the original term\n"
+                        "4. Providing professional and inclusive language\n"
+                        "5. Maintaining the exact meaning and intent of the original sentence\n\n"
+                        "CRITICAL: Respond with ONLY the single alternative word or phrase. "
+                        "No explanation, no punctuation beyond apostrophes/hyphens, no numbers, no lists. "
+                        "The response must be a single, clean word or phrase ready to use as a direct replacement."
                     )
                 },
                 {
@@ -484,8 +630,32 @@ def suggest_alternative():
         )
 
         suggestion = response.choices[0].message.content.strip()
-        suggestion = suggestion.strip('"').strip("'").strip()
-        suggestion = suggestion.rstrip('.!,?').strip().lower()
+        # Clean response: remove common artifacts
+        suggestion = suggestion.strip('\"').strip("'").strip()
+        suggestion = suggestion.rstrip('.!,?:;').strip().lower()
+
+        # Detect and filter out problematic responses
+        # 1. Remove if it just repeats the original term
+        if suggestion == term.lower() or suggestion.startswith(term.lower()):
+            suggestion = ""
+        # 2. Remove if empty after cleaning
+        if not suggestion:
+            suggestion = ""
+        # 3. Remove if contains common LLM artifacts (numbers, repeated patterns)
+        if any(c.isdigit() for c in suggestion):
+            suggestion = ""
+        # 4. Check for repetition (word appearing twice consecutively)
+        words = suggestion.split()
+        if len(words) > 1:
+            for i in range(len(words) - 1):
+                if words[i] == words[i + 1]:
+                    suggestion = " ".join([words[0]] + [w for i, w in enumerate(words[1:], 1) if w != words[i-1]])
+                    break
+
+        # If all cleaning failed and we have an invalid response, return empty and log
+        if not suggestion or len(suggestion.split()) > 4:
+            print(f"[/suggest] WARNING: Groq returned problematic response for '{term}': {response.choices[0].message.content}")
+            suggestion = ""
 
         return jsonify({
             'term':          term,
@@ -537,7 +707,7 @@ def batch_detect():
             predicted_class = CLASS_NAME_MAPPING.get(predicted_class_raw, predicted_class_raw)
 
             probabilities = rf_model.predict_proba([embeddings])[0]
-            
+
             # Build confidence_scores with all classes in consistent order
             confidence_scores = {}
             for i, raw_class_name in enumerate(label_encoder.classes_):
@@ -545,6 +715,21 @@ def batch_detect():
                 confidence_scores[mapped_class_name] = float(probabilities[i])
 
             flagged_phrases = extract_flagged_phrases(text)
+
+            # Post-processing override (mirrors /detect endpoint)
+            masculine_count = len(flagged_phrases['masculine'])
+            feminine_count  = len(flagged_phrases['feminine'])
+            neutral_score   = confidence_scores.get('Neutral', 0)
+
+            if (predicted_class == 'Male'
+                    and masculine_count == 0
+                    and neutral_score > 0.25):
+                predicted_class = 'Neutral'
+
+            elif (predicted_class == 'Female'
+                    and feminine_count == 0
+                    and neutral_score > 0.25):
+                predicted_class = 'Neutral'
 
             results.append({
                 'text': text,

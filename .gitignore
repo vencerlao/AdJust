@@ -53,3 +53,8 @@ app.*.map.json
 backend/models/config.json
 label_encoder.pkl
 random_forest.pkl
+
+# mann_kendall
+mann_kendall_results.csv
+mann_kendall_summary.csv
+timeseries_with_trend.csv

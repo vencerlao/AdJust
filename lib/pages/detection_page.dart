@@ -50,9 +50,34 @@ class _DetectionPageState extends State<DetectionPage> {
   Future<void> _detectBias() async {
     final text = _textController.text.trim();
     if (text.isEmpty) {
-      setState(() => _error = 'Please enter some text');
+      setState(() {
+        _error = 'Please enter some text';
+        _result = null;
+      });
+        
       return;
     }
+
+    final wordCount = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    if (wordCount < 30) {
+      final savedText = text;
+      setState(() {
+        _error = 'Please enter more text';
+        _result = null;
+        _textController.clear();
+      });
+
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          setState(() {
+            _textController.value = TextEditingValue(text: savedText);
+            _error = null;
+          });
+        }
+      }); // 👈 still inside the if block
+
+      return;
+    } 
 
     setState(() {
       _isLoading = true;
@@ -186,7 +211,7 @@ class _DetectionPageState extends State<DetectionPage> {
     );
 
     setState(() {
-      _textController.text = updatedText;
+      _textController.value = TextEditingValue(text: updatedText);
       _hoveredWord = null;
       _suggestions.clear();
       _suggestionLoading.clear();
@@ -361,10 +386,9 @@ class _DetectionPageState extends State<DetectionPage> {
           hintStyle: GoogleFonts.poppins(
             color: _error != null ? Colors.red : Colors.grey,
             fontSize: _kFontSize,
-            fontWeight: _error != null ? FontWeight.w400 : FontWeight.normal,
+            fontWeight: _error != null ? FontWeight.w600 : FontWeight.normal,
           ),
           border: InputBorder.none,
-          // Use contentPadding that accounts for CustomScrollbar width
           contentPadding: _kContentPadding,
           isDense: false,
         ),
@@ -435,7 +459,7 @@ class _DetectionPageState extends State<DetectionPage> {
                           children: [
                             _buildDetectButton(),
                             const SizedBox(width: 12),
-                            OutlinedButton(
+                           ElevatedButton(
                               onPressed: () {
                                 setState(() {
                                   _result = null;
@@ -445,13 +469,35 @@ class _DetectionPageState extends State<DetectionPage> {
                                   _hoveredWord = null;
                                 });
                               },
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 28, vertical: 18),
-                                side: const BorderSide(
-                                    color: Color(0xFFA984AE), width: 2),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(30),
+                              style: ButtonStyle(
+                                padding: MaterialStateProperty.all(
+                                  const EdgeInsets.symmetric(horizontal: 100, vertical: 18),
+                                ),
+                                elevation: MaterialStateProperty.all(4),
+                                backgroundColor:
+                                    MaterialStateProperty.resolveWith<Color>((states) {
+                                  if (states.contains(MaterialState.disabled)) {
+                                    return const Color(0xFFD4B5E8).withOpacity(0.6);
+                                  }
+                                  return states.contains(MaterialState.hovered)
+                                      ? const Color(0xFF3A0E52)
+                                      : const Color(0xFFD4B5E8);
+                                }),
+                                foregroundColor: MaterialStateProperty.resolveWith<Color>(
+                                  (states) => states.contains(MaterialState.hovered)
+                                      ? const Color(0xFFD4B5E8)
+                                      : const Color(0xFF280647),
+                                ),
+                                shape: MaterialStateProperty.resolveWith<OutlinedBorder>(
+                                  (states) => RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(30),
+                                    side: BorderSide(
+                                      color: states.contains(MaterialState.hovered)
+                                          ? const Color(0xFFD4B5E8)
+                                          : const Color(0xFF280647),
+                                      width: 2.5,
+                                    ),
+                                  ),
                                 ),
                               ),
                               child: Text(
@@ -459,7 +505,6 @@ class _DetectionPageState extends State<DetectionPage> {
                                 style: GoogleFonts.poppins(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w800,
-                                  color: const Color(0xFF280647),
                                 ),
                               ),
                             ),
