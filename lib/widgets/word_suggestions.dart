@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Popover widget that displays gender-neutral suggestion for a biased term.
-/// Used when hovering over underlined gender-coded words in the text field.
 class SuggestionPopover extends StatelessWidget {
   final String term;
   final String? suggestion;
@@ -44,7 +42,6 @@ class SuggestionPopover extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Original term with strikethrough
           Text(
             'Original:',
             style: GoogleFonts.poppins(
@@ -65,7 +62,6 @@ class SuggestionPopover extends StatelessWidget {
           ),
           const SizedBox(height: 12),
 
-          // Suggestion or loading indicator
           Text(
             'Suggestion:',
             style: GoogleFonts.poppins(
@@ -112,7 +108,6 @@ class SuggestionPopover extends StatelessWidget {
             ),
           const SizedBox(height: 16),
 
-          // Action buttons
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [

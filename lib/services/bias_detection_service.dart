@@ -56,11 +56,8 @@ class GenderNeutralSuggestion {
 }
 
 class BiasDetectionService {
-  // Change this to your backend URL
   static const String baseUrl = 'http://localhost:5000';
   static const Duration timeout = Duration(seconds: 30);
-
-  /// Detect bias in a single text
   static Future<BiasDetectionResult> detectBias(String text) async {
     try {
       final response = await http
@@ -82,7 +79,6 @@ class BiasDetectionService {
     }
   }
 
-  /// Batch detect bias in multiple texts
   static Future<List<BiasDetectionResult>> batchDetect(
       List<String> texts) async {
     try {
@@ -108,13 +104,11 @@ class BiasDetectionService {
     }
   }
 
-  /// Get a context-aware gender-neutral suggestion for a biased term
-  /// 
+  
   /// [term] - The biased word to replace
   /// [biasType] - Either "masculine" or "feminine"
   /// [context] - The sentence or surrounding text containing the term (optional)
-  ///
-  /// Returns a suggestion that is grammar and context-aware
+
   static Future<GenderNeutralSuggestion> getContextAwareSuggestion(
     String term,
     String biasType, {
@@ -146,7 +140,32 @@ class BiasDetectionService {
     }
   }
 
-  /// Check if backend is available
+  /// [text] - The full job advertisement text to rewrite
+  
+  static Future<Map<String, dynamic>> rewriteJobAdToNeutral(String text) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/rewrite'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'text': text}),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return {
+          'rewritten_text': data['rewritten_text'] ?? '',
+          'detection_result': BiasDetectionResult.fromJson(data),
+        };
+      } else {
+        throw Exception('Error: ${response.statusCode} - ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Failed to rewrite job ad: $e');
+    }
+  }
+
   static Future<bool> healthCheck() async {
     try {
       final response = await http
@@ -158,7 +177,6 @@ class BiasDetectionService {
     }
   }
 
-  /// Get model information from the backend
   static Future<Map<String, dynamic>> getModelInfo() async {
     try {
       final response = await http

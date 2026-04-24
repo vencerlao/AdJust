@@ -3,14 +3,12 @@ import 'package:flutter/material.dart';
 class CustomScrollbar extends StatefulWidget {
   final Widget child;
 
-  // Track & thumb
   final Color trackColor;
   final Color thumbColor;
   final double trackWidth;
   final double thumbThickness;
   final double radius;
 
-  // Arrow icons
   final Color arrowColor;
   final double iconSize;
   final double arrowInset;
@@ -21,14 +19,12 @@ class CustomScrollbar extends StatefulWidget {
     super.key,
     required this.child,
 
-    // Track & thumb defaults
     this.trackColor = const Color(0xFFF9E9FE),
     this.thumbColor = const Color(0xFFA984AE),
     this.trackWidth = 13.0,
     this.thumbThickness = 6.0,
     this.radius = 10.0,
 
-    // Arrow defaults
     this.arrowColor = const Color(0xFFA984AE),
     this.iconSize = 20.0,
     this.arrowInset = .0,
