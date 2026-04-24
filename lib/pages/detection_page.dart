@@ -24,6 +24,7 @@ class _DetectionPageState extends State<DetectionPage> {
   late TextEditingController _textController;
   BiasDetectionResult? _result;
   bool _isLoading = false;
+  bool _isRewriting = false;
   String? _error;
   int _hoveredSectionIndex = -1;
 
@@ -74,7 +75,7 @@ class _DetectionPageState extends State<DetectionPage> {
             _error = null;
           });
         }
-      }); // 👈 still inside the if block
+      }); 
 
       return;
     } 
@@ -98,6 +99,43 @@ class _DetectionPageState extends State<DetectionPage> {
       setState(() {
         _error = e.toString();
         _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _rewriteToNeutral() async {
+    final text = _textController.text.trim();
+    if (text.isEmpty) {
+      setState(() {
+        _error = 'Please enter some text';
+        _result = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _isRewriting = true;
+      _error = null;
+      _suggestions.clear();
+      _suggestionLoading.clear();
+      _suggestionErrors.clear();
+      _hoveredWord = null;
+    });
+
+    try {
+      final rewriteResponse = await BiasDetectionService.rewriteJobAdToNeutral(text);
+      final rewrittenText = rewriteResponse['rewritten_text'] as String;
+      final detectionResult = rewriteResponse['detection_result'] as BiasDetectionResult;
+
+      setState(() {
+        _textController.value = TextEditingValue(text: rewrittenText);
+        _result = detectionResult;
+        _isRewriting = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _isRewriting = false;
       });
     }
   }
@@ -251,7 +289,6 @@ class _DetectionPageState extends State<DetectionPage> {
     );
   }
 
-  // Single source of truth for the text style used in both states.
   TextStyle get _sharedTextStyle => GoogleFonts.poppins(
         fontSize: _kFontSize,
         color: const Color(0xFF333333),
@@ -320,12 +357,6 @@ class _DetectionPageState extends State<DetectionPage> {
             decorationColor: underlineColor,
             decorationThickness: 3.0,
           ),
-          recognizer: TapGestureRecognizer()
-            ..onTap = () {
-              _hoveredWord = wordAtPos;
-              _fetchSuggestion(wordAtPos);
-              _showSuggestionPopover(wordAtPos);
-            },
         ),
       );
 
@@ -339,8 +370,6 @@ class _DetectionPageState extends State<DetectionPage> {
       ));
     }
 
-    // Wrap in SingleChildScrollView to allow proper scrolling within CustomScrollbar
-    // without layout conflicts. This mirrors the TextField approach.
     return SingleChildScrollView(
       child: Padding(
         padding: _kContentPadding,
@@ -348,8 +377,6 @@ class _DetectionPageState extends State<DetectionPage> {
           TextSpan(style: plainStyle, children: spans),
           textAlign: TextAlign.left,
           textDirection: TextDirection.ltr,
-          // StrutStyle pins the line-box height to the same value Flutter
-          // uses internally for the TextField, preventing the 1-2 px shift.
           strutStyle: StrutStyle(
             fontFamily: plainStyle.fontFamily,
             fontSize: _kFontSize,
@@ -362,13 +389,10 @@ class _DetectionPageState extends State<DetectionPage> {
     );
   }
 
-  // Builds the input TextField, constrained to fill its parent at all times.
   Widget _buildTextField() {
     return SingleChildScrollView(
-      // ScrollDirection.vertical by default, allows proper scrolling without conflicts
       child: TextField(
         controller: _textController,
-        // Use maxLines instead of expands to let SingleChildScrollView handle sizing
         maxLines: null,
         keyboardType: TextInputType.multiline,
         style: _sharedTextStyle,
@@ -416,7 +440,6 @@ class _DetectionPageState extends State<DetectionPage> {
       ),
       child: Row(
         children: [
-          // ── LEFT COLUMN ───────────────────────────────────────────────
           Expanded(
             flex: 10,
             child: Column(
@@ -439,8 +462,6 @@ class _DetectionPageState extends State<DetectionPage> {
                         ),
                       ],
                     ),
-                    // CustomScrollbar wraps both states to provide consistent scrolling
-                    // and appearance. The padding accounts for scrollbar width (13px).
                     child: CustomScrollbar(
                       child: _result != null
                           ? _buildHighlightedTextDisplay()
@@ -457,57 +478,9 @@ class _DetectionPageState extends State<DetectionPage> {
                       ? Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            _buildDetectButton(),
+                            _buildEditButton(),
                             const SizedBox(width: 12),
-                           ElevatedButton(
-                              onPressed: () {
-                                setState(() {
-                                  _result = null;
-                                  _suggestions.clear();
-                                  _suggestionLoading.clear();
-                                  _suggestionErrors.clear();
-                                  _hoveredWord = null;
-                                });
-                              },
-                              style: ButtonStyle(
-                                padding: MaterialStateProperty.all(
-                                  const EdgeInsets.symmetric(horizontal: 100, vertical: 18),
-                                ),
-                                elevation: MaterialStateProperty.all(4),
-                                backgroundColor:
-                                    MaterialStateProperty.resolveWith<Color>((states) {
-                                  if (states.contains(MaterialState.disabled)) {
-                                    return const Color(0xFFD4B5E8).withOpacity(0.6);
-                                  }
-                                  return states.contains(MaterialState.hovered)
-                                      ? const Color(0xFF3A0E52)
-                                      : const Color(0xFFD4B5E8);
-                                }),
-                                foregroundColor: MaterialStateProperty.resolveWith<Color>(
-                                  (states) => states.contains(MaterialState.hovered)
-                                      ? const Color(0xFFD4B5E8)
-                                      : const Color(0xFF280647),
-                                ),
-                                shape: MaterialStateProperty.resolveWith<OutlinedBorder>(
-                                  (states) => RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(30),
-                                    side: BorderSide(
-                                      color: states.contains(MaterialState.hovered)
-                                          ? const Color(0xFFD4B5E8)
-                                          : const Color(0xFF280647),
-                                      width: 2.5,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              child: Text(
-                                'EDIT',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
+                            _buildRewriteButton(),
                           ],
                         )
                       : _buildDetectButton(),
@@ -518,7 +491,6 @@ class _DetectionPageState extends State<DetectionPage> {
 
           const SizedBox(width: 10),
 
-          // ── RIGHT COLUMN ──────────────────────────────────────────────
           Expanded(
             flex: 5,
             child: Column(
@@ -830,9 +802,110 @@ class _DetectionPageState extends State<DetectionPage> {
             ),
     );
   }
+
+  Widget _buildEditButton() {
+    return ElevatedButton(
+      onPressed: () {
+        setState(() {
+          _result = null;
+          _suggestions.clear();
+          _suggestionLoading.clear();
+          _suggestionErrors.clear();
+          _hoveredWord = null;
+        });
+      },
+      style: ButtonStyle(
+        padding: MaterialStateProperty.all(
+          const EdgeInsets.symmetric(horizontal: 100, vertical: 18),
+        ),
+        elevation: MaterialStateProperty.all(4),
+        backgroundColor:
+            MaterialStateProperty.resolveWith<Color>((states) {
+          if (states.contains(MaterialState.disabled)) {
+            return const Color(0xFFD4B5E8).withOpacity(0.6);
+          }
+          return states.contains(MaterialState.hovered)
+              ? const Color(0xFF3A0E52)
+              : const Color(0xFFD4B5E8);
+        }),
+        foregroundColor: MaterialStateProperty.resolveWith<Color>(
+          (states) => states.contains(MaterialState.hovered)
+              ? const Color(0xFFD4B5E8)
+              : const Color(0xFF280647),
+        ),
+        shape: MaterialStateProperty.resolveWith<OutlinedBorder>(
+          (states) => RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+            side: BorderSide(
+              color: states.contains(MaterialState.hovered)
+                  ? const Color(0xFFD4B5E8)
+                  : const Color(0xFF280647),
+              width: 2.5,
+            ),
+          ),
+        ),
+      ),
+      child: Text(
+        'EDIT',
+        style: GoogleFonts.poppins(
+          fontSize: 18,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRewriteButton() {
+    return ElevatedButton(
+      onPressed: _isRewriting ? null : _rewriteToNeutral,
+      style: ButtonStyle(
+        padding: MaterialStateProperty.all(
+          const EdgeInsets.symmetric(horizontal: 80, vertical: 18),
+        ),
+        elevation: MaterialStateProperty.all(4),
+        backgroundColor:
+            MaterialStateProperty.resolveWith<Color>((states) {
+          if (states.contains(MaterialState.disabled)) {
+            return const Color(0xFFB188B6).withOpacity(0.6);
+          }
+          return states.contains(MaterialState.hovered)
+              ? const Color(0xFF3A0E52)
+              : const Color(0xFFB188B6);
+        }),
+        foregroundColor: MaterialStateProperty.resolveWith<Color>(
+          (states) => states.contains(MaterialState.hovered)
+              ? const Color(0xFFB188B6)
+              : const Color(0xFF280647),
+        ),
+        shape: MaterialStateProperty.resolveWith<OutlinedBorder>(
+          (states) => RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+            side: BorderSide(
+              color: states.contains(MaterialState.hovered)
+                  ? const Color(0xFFB188B6)
+                  : const Color(0xFF280647),
+              width: 2.5,
+            ),
+          ),
+        ),
+      ),
+      child: _isRewriting
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Text(
+              'REWRITE',
+              style: GoogleFonts.poppins(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+    );
+  }
 }
 
-// ── PERCENTAGE INDICATOR ────────────────────────────────────────────────────
 
 class _PercentageIndicator extends StatelessWidget {
   final String label;
@@ -878,7 +951,6 @@ class _PercentageIndicator extends StatelessWidget {
   }
 }
 
-// ── CODED WORD LIST ─────────────────────────────────────────────────────────
 
 class _CodedWordList extends StatelessWidget {
   final String title;
@@ -944,8 +1016,6 @@ class _CodedWordList extends StatelessWidget {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              // Filled circle bullet colored to match the
-                              // gender category of the list.
                               Container(
                                 width: 6,
                                 height: 6,
