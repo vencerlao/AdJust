@@ -1205,19 +1205,26 @@ def rewrite_gender_neutral():
 
         masculine_count = len(post_flagged['masculine'])
         feminine_count  = len(post_flagged['feminine'])
-        neutral_score   = confidence_scores.get('Neutral', 0)
 
-        if masculine_count == 0 and feminine_count == 0 and neutral_score > 0.20:
+        if masculine_count == 0 and feminine_count == 0:
             predicted_class = 'Neutral'
-        total_biased = confidence_scores.get('Male', 0) + confidence_scores.get('Female', 0)
-        if total_biased > 0:
-            confidence_scores['Neutral'] = max(confidence_scores.get('Neutral', 0), 0.60)
-            remaining = 1.0 - confidence_scores['Neutral']
-            male_ratio = confidence_scores.get('Male', 0) / total_biased
-            female_ratio = confidence_scores.get('Female', 0) / total_biased
-            confidence_scores['Male'] = round(remaining * male_ratio, 4)
-            confidence_scores['Female'] = round(remaining * female_ratio, 4)
-            confidence_scores['Neutral'] = round(1.0 - confidence_scores['Male'] - confidence_scores['Female'], 4)
+            raw_neutral = confidence_scores.get('Neutral', 0)
+            raw_male = confidence_scores.get('Male', 0)
+            raw_female = confidence_scores.get('Female', 0)
+            total = raw_neutral + raw_male + raw_female 
+            total_biased = raw_male + raw_female
+            neutral = raw_neutral + (total_biased * 0.5)
+            remaining = 1.0 - neutral
+
+            if total_biased > 0:
+                confidence_scores['Male']    = round(remaining * (raw_male / total_biased), 4)
+                confidence_scores['Female']  = round(remaining * (raw_female / total_biased), 4)
+            else:
+                confidence_scores['Male']   = 0.0
+                confidence_scores['Female'] = 0.0
+            confidence_scores['Neutral'] = round(
+                1.0 - confidence_scores['Male'] - confidence_scores['Female'], 4
+            )
 
         length_expansion_ratio = len(rewritten_text) / original_text_len if original_text_len > 0 else 1.0
 
