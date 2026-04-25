@@ -143,11 +143,11 @@ class _DetectionPageState extends State<DetectionPage> {
   Color _getClassColor(String className) {
     switch (className) {
       case 'Male':
-        return const Color(0xFFC49FC9);
+        return const Color(0xFF8E7AB5);
       case 'Female':
         return const Color(0xFFB188B6);
       case 'Neutral':
-        return const Color(0xFF2D3436);
+        return const Color(0xFF7A5C9E);
       default:
         return Colors.grey;
     }
@@ -347,7 +347,7 @@ class _DetectionPageState extends State<DetectionPage> {
 
       final isMasculine = masculine.contains(wordAtPos);
       final underlineColor =
-          isMasculine ? const Color(0xFFC49FC9) : const Color(0xFFB188B6);
+          isMasculine ? const Color(0xFF8E7AB5) : const Color(0xFFB188B6);
 
       spans.add(
         TextSpan(
@@ -545,7 +545,7 @@ class _DetectionPageState extends State<DetectionPage> {
                                                             'Male'] ??
                                                         0) *
                                                     100,
-                                            color: const Color(0xFFC49FC9),
+                                            color: const Color(0xFF8E7AB5),
                                             title: '',
                                             radius: _hoveredSectionIndex == 0
                                                 ? 28
@@ -567,7 +567,7 @@ class _DetectionPageState extends State<DetectionPage> {
                                                             'Neutral'] ??
                                                         0) *
                                                     100,
-                                            color: const Color(0xFF2D3436),
+                                            color: const Color(0xFF7A5C9E),
                                             title: '',
                                             radius: _hoveredSectionIndex == 2
                                                 ? 28
@@ -585,7 +585,7 @@ class _DetectionPageState extends State<DetectionPage> {
                                     style: GoogleFonts.poppins(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w700,
-                                      color: const Color(0xFF2D3436),
+                                      color: _getClassColor(_result!.detectedClass),
                                     ),
                                   ),
                                 ],
@@ -684,7 +684,7 @@ class _DetectionPageState extends State<DetectionPage> {
                         percentage: _result != null
                             ? (_result!.confidenceScores['Male'] ?? 0) * 100
                             : 0,
-                        color: const Color(0xFFC49FC9),
+                        color: const Color(0xFF8E7AB5),
                         isHighlighted: _hoveredSectionIndex == 0,
                         onHover: (hovering) {
                           setState(() {
@@ -710,7 +710,7 @@ class _DetectionPageState extends State<DetectionPage> {
                         percentage: _result != null
                             ? (_result!.confidenceScores['Neutral'] ?? 0) * 100
                             : 0,
-                        color: const Color(0xFF2D3436),
+                        color: const Color(0xFF7A5C9E),
                         isHighlighted: _hoveredSectionIndex == 2,
                         onHover: (hovering) {
                           setState(() {
@@ -731,7 +731,7 @@ class _DetectionPageState extends State<DetectionPage> {
                         child: _CodedWordList(
                           title: 'Masculine Coded Words',
                           words: _getWords('masculine'),
-                          bulletColor: const Color(0xFFC49FC9),
+                          bulletColor: const Color(0xFF8E7AB5),
                         ),
                       ),
                       const SizedBox(width: 12),
