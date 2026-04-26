@@ -205,18 +205,29 @@ class _DashboardPageState extends State<DashboardPage> {
   String _selectedIndustryTop = 'Public Service';
   String _selectedIndustryDist = 'Public Service';
   String _selectedBias = 'Male-bias';
+
+  // ── Line-chart series toggles ──────────────────────────────────────────
+  bool _showMasculine = true;
+  bool _showFeminine = true;
   bool _showNeutral = false;
+  bool _showMaleRanking = true; 
 
   _DashboardData? _data;
   bool _loading = true;
 
-  static const Color _purple = Color(0xFF7C3AED);
-  static const Color _purpleMid = Color(0xFFA855F7);
+  // ── Updated brand colours ──────────────────────────────────────────────
+  static const Color _purple      = Color(0xFF7C3AED);
+  static const Color _purpleMid   = Color(0xFFA855F7);
   static const Color _purpleLight = Color(0xFFEDE9FE);
-  static const Color _mascColor = Color(0xFF5B9BD5);
-  static const Color _femColor = Color(0xFFE07B8C);
-  static const Color _neutColor = Color(0xFF7ABA7B);
-  static const Color _trendColor = Color(0xFF2D1B4E);
+  // male → #8643CA (medium purple), female → #4C167F (deep plum), neutral → deep plum
+  static const Color _mascColor   = Color(0xFF8643CA);
+  static const Color _femColor    = Color(0xFF4C167F);
+  static const Color _neutColor   = Color(0xFF4A2947);
+  static const Color _trendColor  = Color(0xFF2D1B4E);
+  // Ranking gradient stops: top-ranked (lightest) → bottom-ranked (darkest)
+  static const Color _rankGradStart = Color(0xFFD09AE0);
+  static const Color _rankGradMid   = Color(0xFF8643CA);
+  static const Color _rankGradEnd   = Color(0xFF4C167F);
 
   @override
   void initState() {
@@ -297,7 +308,10 @@ class _DashboardPageState extends State<DashboardPage> {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
       const SizedBox(width: 5),
       Text(label,
-          style: const TextStyle(fontSize: 11, color: Color(0xFF3B1F5E))),
+          style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF3B1F5E))),
       const SizedBox(width: 12),
     ]);
   }
@@ -328,9 +342,64 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  // ── Reusable series toggle pill ────────────────────────────────────────────
+  Widget _seriesToggle({
+    required bool active,
+    required Color activeColor,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: active
+              ? activeColor.withOpacity(0.18)
+              : Colors.grey.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: active
+                ? activeColor.withOpacity(0.7)
+                : Colors.grey.withOpacity(0.3),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8, height: 8,
+              decoration: BoxDecoration(
+                color: active ? activeColor : Colors.grey,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: active ? activeColor : Colors.grey[500],
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              active
+                  ? Icons.visibility_rounded
+                  : Icons.visibility_off_rounded,
+              size: 13,
+              color: active ? activeColor : Colors.grey[400],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
-  // Card 1: Gender Bias Over 10 Years — Line chart (masc, fem, neutral)
-  //         with Sen's slope trend lines
+  // Card 1: Gender Bias Over 10 Years — Line chart
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildGenderBiasCard() {
     return _buildCard(
@@ -355,8 +424,10 @@ class _DashboardPageState extends State<DashboardPage> {
               _buildDropdown(
                 value: _selectedIndustryTop,
                 items: kIndustries,
-                onChanged: (v) =>
-                    setState(() => _selectedIndustryTop = v!),
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _selectedIndustryTop = v);
+                },
               ),
             ],
           ),
@@ -386,49 +457,53 @@ class _DashboardPageState extends State<DashboardPage> {
 
     final years = mascPts.map((p) => p.year).toList();
     const minY = 0.0;
-    final visiblePts = [
-      ...mascPts.map((p) => p.value),
-      ...femPts.map((p) => p.value),
-      if (_showNeutral) ...neutPts.map((p) => p.value),
+
+    final visiblePts = <double>[
+      if (_showMasculine) ...mascPts.map((p) => p.value),
+      if (_showFeminine)  ...femPts.map((p) => p.value),
+      if (_showNeutral)   ...neutPts.map((p) => p.value),
     ];
-    final maxVal = visiblePts.fold<double>(0, (m, v) => v > m ? v : m);
-    final maxY = ((maxVal + 5) / 5).ceil() * 5.0; // round up to nearest 5
+    final maxVal = visiblePts.isEmpty
+        ? 30.0
+        : visiblePts.fold<double>(0, (m, v) => v > m ? v : m);
+    final maxY = ((maxVal + 5) / 5).ceil() * 5.0;
 
     List<FlSpot> toSpots(List<_TsPoint> pts) =>
-        pts.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.value)).toList();
+        pts.asMap().entries
+            .map((e) => FlSpot(e.key.toDouble(), e.value.value))
+            .toList();
 
     final bars = <LineChartBarData>[
-      // Masculine
-      LineChartBarData(
-        spots: toSpots(mascPts),
-        isCurved: true,
-        curveSmoothness: 0.3,
-        color: _mascColor,
-        barWidth: 2.5,
-        dotData: FlDotData(
-          show: true,
-          getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
-              radius: 3.5, color: _mascColor,
-              strokeWidth: 1.5, strokeColor: Colors.white),
+      if (_showMasculine)
+        LineChartBarData(
+          spots: toSpots(mascPts),
+          isCurved: true,
+          curveSmoothness: 0.3,
+          color: _mascColor,
+          barWidth: 2.5,
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
+                radius: 3.5, color: _mascColor,
+                strokeWidth: 1.5, strokeColor: Colors.white),
+          ),
+          belowBarData: BarAreaData(show: false),
         ),
-        belowBarData: BarAreaData(show: false),
-      ),
-      // Feminine
-      LineChartBarData(
-        spots: toSpots(femPts),
-        isCurved: true,
-        curveSmoothness: 0.3,
-        color: _femColor,
-        barWidth: 2.5,
-        dotData: FlDotData(
-          show: true,
-          getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
-              radius: 3.5, color: _femColor,
-              strokeWidth: 1.5, strokeColor: Colors.white),
+      if (_showFeminine)
+        LineChartBarData(
+          spots: toSpots(femPts),
+          isCurved: true,
+          curveSmoothness: 0.3,
+          color: _femColor,
+          barWidth: 2.5,
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
+                radius: 3.5, color: _femColor,
+                strokeWidth: 1.5, strokeColor: Colors.white),
+          ),
+          belowBarData: BarAreaData(show: false),
         ),
-        belowBarData: BarAreaData(show: false),
-      ),
-      // Neutral — only when toggled on
       if (_showNeutral)
         LineChartBarData(
           spots: toSpots(neutPts),
@@ -446,69 +521,43 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
     ];
 
-    final tooltipLabels = _showNeutral
-        ? ['Masculine', 'Feminine', 'Neutral']
-        : ['Masculine', 'Feminine'];
-    final tooltipColors = _showNeutral
-        ? [_mascColor, _femColor, _neutColor]
-        : [_mascColor, _femColor];
+    // Build tooltip labels/colors to match only visible series, in order
+    final tooltipLabels = <String>[
+      if (_showMasculine) 'Masculine',
+      if (_showFeminine)  'Feminine',
+      if (_showNeutral)   'Neutral',
+    ];
+    final tooltipColors = <Color>[
+      if (_showMasculine) _mascColor,
+      if (_showFeminine)  _femColor,
+      if (_showNeutral)   _neutColor,
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Legend + Neutral toggle row
+        // ── Toggle row: Masculine | Feminine | Neutral ────────────────────
         Row(
           children: [
-            _legendDot(_mascColor, 'Masculine'),
-            _legendDot(_femColor, 'Feminine'),
+            _seriesToggle(
+              active: _showMasculine,
+              activeColor: _mascColor,
+              label: 'Masculine',
+              onTap: () => setState(() => _showMasculine = !_showMasculine),
+            ),
+            const SizedBox(width: 8),
+            _seriesToggle(
+              active: _showFeminine,
+              activeColor: _femColor,
+              label: 'Feminine',
+              onTap: () => setState(() => _showFeminine = !_showFeminine),
+            ),
             const Spacer(),
-            // Neutral toggle
-            GestureDetector(
+            _seriesToggle(
+              active: _showNeutral,
+              activeColor: _neutColor,
+              label: 'Neutral',
               onTap: () => setState(() => _showNeutral = !_showNeutral),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _showNeutral
-                      ? _neutColor.withOpacity(0.15)
-                      : Colors.grey.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: _showNeutral
-                        ? _neutColor.withOpacity(0.6)
-                        : Colors.grey.withOpacity(0.3),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 8, height: 8,
-                      decoration: BoxDecoration(
-                        color: _showNeutral ? _neutColor : Colors.grey,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      'Neutral',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: _showNeutral ? _neutColor : Colors.grey[500],
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      _showNeutral
-                          ? Icons.visibility_rounded
-                          : Icons.visibility_off_rounded,
-                      size: 13,
-                      color: _showNeutral ? _neutColor : Colors.grey[400],
-                    ),
-                  ],
-                ),
-              ),
             ),
           ],
         ),
@@ -516,78 +565,101 @@ class _DashboardPageState extends State<DashboardPage> {
 
         SizedBox(
           height: 452,
-          child: LineChart(
-            LineChartData(
-              minY: minY,
-              maxY: maxY,
-              gridData: FlGridData(
-                show: true,
-                drawVerticalLine: false,
-                getDrawingHorizontalLine: (_) => FlLine(
-                    color: Colors.grey.withOpacity(0.15), strokeWidth: 1),
-              ),
-              borderData: FlBorderData(
-                show: true,
-                border: Border(
-                  bottom: BorderSide(color: Colors.grey.withOpacity(0.3)),
-                  left: BorderSide(color: Colors.grey.withOpacity(0.3)),
-                ),
-              ),
-              titlesData: FlTitlesData(
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    interval: 1,
-                    getTitlesWidget: (val, _) {
-                      final idx = val.toInt();
-                      if (idx < 0 || idx >= years.length) {
-                        return const SizedBox.shrink();
-                      }
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text('${years[idx]}',
-                            style: const TextStyle(
-                                fontSize: 10, color: Color(0xFF3B1F5E))),
-                      );
-                    },
-                  ),
-                ),
-                leftTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    interval: 20,
-                    reservedSize: 36,
-                    getTitlesWidget: (val, _) => Text(
-                      '${val.toInt()}%',
-                      style: const TextStyle(
-                          fontSize: 10, color: Color(0xFF3B1F5E)),
+          child: bars.isEmpty
+              ? const Center(
+                  child: Text('No series selected',
+                      style: TextStyle(
+                          color: Color(0xFF3B1F5E),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500)))
+              : LineChart(
+                  LineChartData(
+                    minY: minY,
+                    maxY: maxY,
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: false,
+                      getDrawingHorizontalLine: (_) => FlLine(
+                          color: Colors.grey.withOpacity(0.15),
+                          strokeWidth: 1),
                     ),
+                    borderData: FlBorderData(
+                      show: true,
+                      border: Border(
+                        bottom: BorderSide(
+                            color: Colors.grey.withOpacity(0.3)),
+                        left: BorderSide(
+                            color: Colors.grey.withOpacity(0.3)),
+                      ),
+                    ),
+                    titlesData: FlTitlesData(
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          interval: 1,
+                          getTitlesWidget: (val, _) {
+                            final idx = val.toInt();
+                            if (idx < 0 || idx >= years.length) {
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text('${years[idx]}',
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF3B1F5E))),
+                            );
+                          },
+                        ),
+                      ),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          interval: 20,
+                          reservedSize: 40,
+                          getTitlesWidget: (val, _) => Text(
+                            '${val.toInt()}%',
+                            style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF3B1F5E)),
+                          ),
+                        ),
+                      ),
+                      topTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false)),
+                    ),
+                    lineTouchData: LineTouchData(
+                      touchTooltipData: LineTouchTooltipData(
+                        getTooltipColor: (_) => Colors.white,
+                        tooltipBorder:
+                            BorderSide(color: _purple.withOpacity(0.3)),
+                        getTooltipItems: (spots) =>
+                            spots.asMap().entries.map((e) {
+                          final idx = e.key;
+                          final s = e.value;
+                          final label = idx < tooltipLabels.length
+                              ? tooltipLabels[idx]
+                              : '';
+                          final col = idx < tooltipColors.length
+                              ? tooltipColors[idx]
+                              : _purple;
+                          return LineTooltipItem(
+                            '$label: ${s.y.toStringAsFixed(1)}%',
+                            TextStyle(
+                                color: col,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    lineBarsData: bars,
                   ),
                 ),
-                topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false)),
-              ),
-              lineTouchData: LineTouchData(
-                touchTooltipData: LineTouchTooltipData(
-                  getTooltipColor: (_) => Colors.white,
-                  tooltipBorder: BorderSide(color: _purple.withOpacity(0.3)),
-                  getTooltipItems: (spots) => spots.map((s) {
-                    final idx = s.barIndex;
-                    return LineTooltipItem(
-                      '${tooltipLabels[idx]}: ${s.y.toStringAsFixed(1)}%',
-                      TextStyle(
-                          color: tooltipColors[idx],
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600),
-                    );
-                  }).toList(),
-                ),
-              ),
-              lineBarsData: bars,
-            ),
-          ),
         ),
       ],
     );
@@ -752,8 +824,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   _buildDropdown(
                     value: _selectedIndustryDist,
                     items: kIndustries,
-                    onChanged: (v) =>
-                        setState(() => _selectedIndustryDist = v!),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setState(() => _selectedIndustryDist = v);
+                    },
                   ),
                 ],
               ),
@@ -793,11 +867,11 @@ class _DashboardPageState extends State<DashboardPage> {
         barRods: [
           BarChartRodData(
             toY: masc + fem + neut,
-            width: 22,
+            width: 32, // wider bars
             borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
             rodStackItems: [
-              BarChartRodStackItem(0, fem, _femColor),
-              BarChartRodStackItem(fem, fem + masc, _mascColor),
+              BarChartRodStackItem(0, fem, const Color(0xFF9666A5)),
+              BarChartRodStackItem(fem, fem + masc, const Color(0xFFD09AE0)),
               BarChartRodStackItem(fem + masc, fem + masc + neut, _neutColor),
             ],
           ),
@@ -809,8 +883,8 @@ class _DashboardPageState extends State<DashboardPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(children: [
-          _legendDot(_mascColor, 'Masculine'),
-          _legendDot(_femColor, 'Feminine'),
+          _legendDot(const Color(0xFFD09AE0), 'Masculine'),
+          _legendDot(const Color(0xFF9666A5), 'Feminine'),
           _legendDot(_neutColor, 'Neutral'),
         ]),
         const SizedBox(height: 10),
@@ -846,7 +920,9 @@ class _DashboardPageState extends State<DashboardPage> {
                         padding: const EdgeInsets.only(top: 6),
                         child: Text('${years[idx]}',
                             style: const TextStyle(
-                                fontSize: 9, color: Color(0xFF3B1F5E))),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF3B1F5E))),
                       );
                     },
                   ),
@@ -855,11 +931,13 @@ class _DashboardPageState extends State<DashboardPage> {
                   sideTitles: SideTitles(
                     showTitles: true,
                     interval: 25,
-                    reservedSize: 36,
+                    reservedSize: 40,
                     getTitlesWidget: (val, _) => Text(
                       '${val.toInt()}%',
                       style: const TextStyle(
-                          fontSize: 10, color: Color(0xFF3B1F5E)),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF3B1F5E)),
                     ),
                   ),
                 ),
@@ -876,8 +954,12 @@ class _DashboardPageState extends State<DashboardPage> {
                   getTooltipItem: (group, groupIdx, rod, rodIdx) {
                     final y = years[groupIdx];
                     final m = mascPts[groupIdx].value;
-                    final f = femPts.length > groupIdx ? femPts[groupIdx].value : 0.0;
-                    final n = neutPts.length > groupIdx ? neutPts[groupIdx].value : 0.0;
+                    final f = femPts.length > groupIdx
+                        ? femPts[groupIdx].value
+                        : 0.0;
+                    final n = neutPts.length > groupIdx
+                        ? neutPts[groupIdx].value
+                        : 0.0;
                     return BarTooltipItem(
                       '$y\nMasc: ${m.toStringAsFixed(1)}%\nFem: ${f.toStringAsFixed(1)}%\nNeut: ${n.toStringAsFixed(1)}%',
                       const TextStyle(
@@ -898,124 +980,182 @@ class _DashboardPageState extends State<DashboardPage> {
   // ══════════════════════════════════════════════════════════════════════════
   // Card 4: Ranking of Industries Based on Gender Bias — Horizontal bar
   // ══════════════════════════════════════════════════════════════════════════
-  Widget _buildRankingCard() {
-    return _buildCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Ranking of Industries Based on Gender Bias',
-                  style: TextStyle(
-                    fontFamily: 'Georgia',
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF3B1F5E),
-                  ),
+Widget _buildRankingCard() {
+  return _buildCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _showMaleRanking
+                    ? 'Top Industries — Male-Coded Job Ads'
+                    : 'Top Industries — Female-Coded Job Ads',
+                style: const TextStyle(
+                  fontFamily: 'Georgia',
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF3B1F5E),
                 ),
               ),
-              _buildDropdown(
-                value: _selectedBias,
-                items: kBiasTypes,
-                onChanged: (v) => setState(() => _selectedBias = v!),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (_loading)
-            const SizedBox(height: 220,
-                child: Center(child: CircularProgressIndicator()))
-          else
-            _buildRankingBars(),
-        ],
-      ),
-    );
+            ),
+            _buildDropdown(
+              value: _showMaleRanking ? 'Male-Coded' : 'Female-Coded',
+              items: ['Male-Coded', 'Female-Coded'],
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() => _showMaleRanking = v == 'Male-Coded');
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        if (_loading)
+          const SizedBox(
+              height: 400,
+              child: Center(child: CircularProgressIndicator()))
+        else
+          _buildRankingBars(),
+      ],
+    ),
+  );
+}
+
+Widget _buildRankingBars() {
+  final industries = kIndustryToCsv.entries
+      .where((e) => e.value != 'ALL')
+      .toList();
+
+  final mascAvg = <String, double>{};
+  final femAvg  = <String, double>{};
+
+  for (final ind in industries) {
+    final csvKey  = ind.value;
+    final mascPts = _data!.getTs(csvKey, 'masculine_pct');
+    final femPts  = _data!.getTs(csvKey, 'feminine_pct');
+
+    if (mascPts.isNotEmpty) {
+      mascAvg[ind.key] = mascPts.map((p) => p.value).reduce((a, b) => a + b)
+          / mascPts.length;
+    }
+    if (femPts.isNotEmpty) {
+      femAvg[ind.key] = femPts.map((p) => p.value).reduce((a, b) => a + b)
+          / femPts.length;
+    }
   }
 
-  Widget _buildRankingBars() {
-    final isMale = _selectedBias == 'Male-bias';
-    final biasMap = _data!.avgBiasPerIndustry;
+  final ranked = industries
+      .map((e) => MapEntry(e.key,
+          _showMaleRanking
+              ? (mascAvg[e.key] ?? 0.0)
+              : (femAvg[e.key] ?? 0.0)))
+      .toList()
+    ..sort((a, b) => b.value.compareTo(a.value));
 
-    // Sort: for male-bias, highest positive first; for female-bias, most negative first
-    final ranked = kIndustryToCsv.entries
-        .where((e) => e.value != 'ALL')
-        .map((e) => MapEntry(e.key, biasMap[e.value] ?? 0.0))
-        .toList();
+  return _buildRankSection(ranked, isMale: _showMaleRanking);
+}
 
-    if (isMale) {
-      ranked.sort((a, b) => b.value.compareTo(a.value));
-    } else {
-      ranked.sort((a, b) => a.value.compareTo(b.value));
-    }
+Widget _buildRankSection(List<MapEntry<String, double>> items, {required bool isMale}) {
+  final maxVal = items.isEmpty ? 1.0 : items.first.value;
 
-    final barColor = isMale ? _mascColor : _femColor;
-    final maxAbs = ranked.fold<double>(
-        0, (m, e) => e.value.abs() > m ? e.value.abs() : m);
+  // Gradient colors from lightest (rank 1) to darkest (rank 10)
+final gradientColors = isMale
+    ? const [
+        Color(0xFF4A2947), // rank 1 — darkest
+        Color(0xFF573454),
+        Color(0xFF643F61),
+        Color(0xFF714A6E),
+        Color(0xFF7E557B),
+        Color(0xFF8B6088),
+        Color(0xFF986B95),
+        Color(0xFFA576A2),
+        Color(0xFFB281AF),
+        Color(0xFFBF8CBC), // rank 10 — lightest
+      ]
+    : const [
+        Color(0xFF3A0E52), // rank 1 — darkest
+        Color(0xFF471A60),
+        Color(0xFF54266E),
+        Color(0xFF61327C),
+        Color(0xFF6E3E8A),
+        Color(0xFF7B4A98),
+        Color(0xFF8856A6),
+        Color(0xFF9562B4),
+        Color(0xFFA26EC2),
+        Color(0xFFAF7AD0), // rank 10 — lightest
+      ];
 
-    return Column(
-      children: ranked.map((entry) {
-        final name  = entry.key;
-        final score = entry.value;
-        final barVal = isMale ? score.clamp(0.0, double.infinity) : (-score).clamp(0.0, double.infinity);
-        final pct = maxAbs > 0 ? barVal / maxAbs : 0.0;
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: items.take(10).toList().asMap().entries.map((entry) {
+      final rank    = entry.key;
+      final name    = entry.value.key;
+      final avg     = entry.value.value;
+      final barFrac = maxVal == 0 ? 0.0 : avg / maxVal;
+      final display = '${avg.toStringAsFixed(1)}%';
+      final color   = gradientColors[rank.clamp(0, gradientColors.length - 1)];
 
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 5),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 160,
-                child: Text(name,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF3B1F5E),
-                        fontWeight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis),
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 180,
+              child: Text(
+                name,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF3B1F5E),
+                ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Stack(
-                  children: [
-                    Container(
-                      height: 20,
-                      decoration: BoxDecoration(
-                        color: barColor.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final barWidth = constraints.maxWidth * barFrac.clamp(0.0, 1.0);
+                  return Container(
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(6),
                     ),
-                    FractionallySizedBox(
-                      widthFactor: pct.clamp(0.0, 1.0),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
                       child: Container(
-                        height: 20,
+                        width: barWidth,
+                        height: 22,
                         decoration: BoxDecoration(
-                          color: barColor.withOpacity(0.75),
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: BorderRadius.circular(6),
+                          color: color,
                         ),
                       ),
                     ),
-                  ],
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 44,
+              child: Text(
+                display,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: color,
                 ),
               ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 50,
-                child: Text(
-                  '${score >= 0 ? '+' : ''}${score.toStringAsFixed(1)}%',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: score > 0 ? _mascColor : _femColor,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
+            ),
+          ],
+        ),
+      );
+    }).toList(),
+  );
+}
 
   // ── Main build ─────────────────────────────────────────────────────────────
   @override
