@@ -56,5 +56,5 @@ random_forest.pkl
 
 # mann_kendall
 mann_kendall_results.csv
-mann_kendall_summary.csv
+mann_kendall_summary_wide.csv
 timeseries_with_trend.csv
