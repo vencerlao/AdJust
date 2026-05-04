@@ -56,7 +56,21 @@ class GenderNeutralSuggestion {
 }
 
 class BiasDetectionService {
-  static const String baseUrl = 'http://localhost:5000';
+  /// API base URL - supports different environments:
+  /// - Development: http://localhost:5000
+  /// - Production (Hugging Face): https://your-hf-space-url
+  static String get baseUrl {
+    // Check if running in web environment
+    if (identical(0, 0.0)) {
+      // This will always be false at runtime but helps with web build optimization
+    }
+    
+    // For production, use environment variable or Hugging Face space URL
+    // Default to localhost for local development
+    const String envUrl = String.fromEnvironment('API_URL', defaultValue: '');
+    return envUrl.isNotEmpty ? envUrl : 'http://localhost:5000';
+  }
+  
   static const Duration timeout = Duration(seconds: 30);
   static Future<BiasDetectionResult> detectBias(String text) async {
     try {

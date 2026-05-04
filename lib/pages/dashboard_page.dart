@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:csv/csv.dart';
 import 'package:fl_chart/fl_chart.dart';
 
-// ── Industry name mapping: dropdown label → CSV value ─────────────────────
 const Map<String, String> kIndustryToCsv = {
   'All Industries': 'ALL',
   'Call Center / BPO': 'call center/it enabled service/bpo',
@@ -34,7 +33,6 @@ const List<String> kIndustries = [
 
 const List<String> kBiasTypes = ['Male-bias', 'Female-bias'];
 
-// ── Data models ────────────────────────────────────────────────────────────
 class _TsPoint {
   final String industry;
   final int year;
@@ -87,7 +85,6 @@ class _MkResult {
   });
 }
 
-// ── Data loader ────────────────────────────────────────────────────────────
 class _DashboardData {
   final List<_TsPoint> timeSeries;
   final List<_MkResult> mkResults;
@@ -95,7 +92,6 @@ class _DashboardData {
   _DashboardData({required this.timeSeries, required this.mkResults});
 
   static Future<_DashboardData> load() async {
-    // Load timeseries_with_trend.csv
     final tsRaw =
         await rootBundle.loadString('data/timeseries_with_trend.csv');
     final tsParsed =
@@ -119,7 +115,6 @@ class _DashboardData {
       ));
     }
 
-    // Load mann_kendall_results.csv
     final mkRaw =
         await rootBundle.loadString('data/mann_kendall_results.csv');
     final mkParsed =
@@ -144,7 +139,6 @@ class _DashboardData {
     return _DashboardData(timeSeries: tsPoints, mkResults: mkResults);
   }
 
-  // Get filtered time series for one industry + series
   List<_TsPoint> getTs(String csvIndustry, String series) {
     return timeSeries
         .where((p) =>
@@ -153,7 +147,6 @@ class _DashboardData {
       ..sort((a, b) => a.year.compareTo(b.year));
   }
 
-  // Total postings per industry (sum across years, masculine_pct series)
   Map<String, int> get totalPostingsPerIndustry {
     final map = <String, int>{};
     for (final p in timeSeries.where((p) => p.series == 'masculine_pct')) {
@@ -162,7 +155,6 @@ class _DashboardData {
     return map;
   }
 
-  // Average bias score (masc% - fem%) per industry
   Map<String, double> get avgBiasPerIndustry {
     final mascSum = <String, double>{};
     final femSum = <String, double>{};
@@ -193,7 +185,6 @@ class _DashboardData {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
 
@@ -206,7 +197,6 @@ class _DashboardPageState extends State<DashboardPage> {
   String _selectedIndustryDist = 'Public Service';
   String _selectedBias = 'Male-bias';
 
-  // ── Line-chart series toggles ──────────────────────────────────────────
   bool _showMasculine = true;
   bool _showFeminine = true;
   bool _showNeutral = false;
@@ -215,16 +205,15 @@ class _DashboardPageState extends State<DashboardPage> {
   _DashboardData? _data;
   bool _loading = true;
 
-  // ── Updated brand colours ──────────────────────────────────────────────
   static const Color _purple      = Color(0xFF7C3AED);
   static const Color _purpleMid   = Color(0xFFA855F7);
   static const Color _purpleLight = Color(0xFFEDE9FE);
-  // male → #8643CA (medium purple), female → #4C167F (deep plum), neutral → deep plum
+
   static const Color _mascColor   = Color(0xFF8643CA);
   static const Color _femColor    = Color(0xFF4C167F);
   static const Color _neutColor   = Color(0xFF4A2947);
   static const Color _trendColor  = Color(0xFF2D1B4E);
-  // Ranking gradient stops: top-ranked (lightest) → bottom-ranked (darkest)
+
   static const Color _rankGradStart = Color(0xFFD09AE0);
   static const Color _rankGradMid   = Color(0xFF8643CA);
   static const Color _rankGradEnd   = Color(0xFF4C167F);
@@ -240,7 +229,6 @@ class _DashboardPageState extends State<DashboardPage> {
     if (mounted) setState(() { _data = data; _loading = false; });
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
   String _toCsv(String label) =>
       kIndustryToCsv[label] ?? label.toLowerCase();
 
@@ -301,7 +289,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // ── Legend dot ─────────────────────────────────────────────────────────────
   Widget _legendDot(Color color, String label) {
     return Row(children: [
       Container(width: 10, height: 10,
@@ -316,7 +303,6 @@ class _DashboardPageState extends State<DashboardPage> {
     ]);
   }
 
-  // ── MK badge ───────────────────────────────────────────────────────────────
   Widget _mkBadge(_MkResult? mk) {
     if (mk == null) return const SizedBox.shrink();
     final sig = mk.significant;
@@ -342,7 +328,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // ── Reusable series toggle pill ────────────────────────────────────────────
   Widget _seriesToggle({
     required bool active,
     required Color activeColor,
@@ -398,9 +383,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // Card 1: Gender Bias Over 10 Years — Line chart
-  // ══════════════════════════════════════════════════════════════════════════
   Widget _buildGenderBiasCard() {
     return _buildCard(
       child: Column(
@@ -521,7 +503,6 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
     ];
 
-    // Build tooltip labels/colors to match only visible series, in order
     final tooltipLabels = <String>[
       if (_showMasculine) 'Masculine',
       if (_showFeminine)  'Feminine',
@@ -536,7 +517,6 @@ class _DashboardPageState extends State<DashboardPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Toggle row: Masculine | Feminine | Neutral ────────────────────
         Row(
           children: [
             _seriesToggle(
@@ -665,11 +645,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // Card 2: Top 10 Industries by Job Ads Volume
-  // ══════════════════════════════════════════════════════════════════════════
   Widget _buildTop10Card() {
-    // Build ranked list from CSV data (exclude ALL)
     final totals = _data?.totalPostingsPerIndustry ?? {};
     final ranked = kIndustryToCsv.entries
         .where((e) => e.value != 'ALL')
@@ -775,7 +751,6 @@ class _DashboardPageState extends State<DashboardPage> {
                       ],
                     ),
                     const SizedBox(height: 5),
-                    // Progress bar
                     ClipRRect(
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
@@ -795,9 +770,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // Card 3: Distribution of Gender Bias — Stacked bar chart per year
-  // ══════════════════════════════════════════════════════════════════════════
   Widget _buildDistributionCard() {
     return _buildCard(
       child: Column(
@@ -867,7 +839,7 @@ class _DashboardPageState extends State<DashboardPage> {
         barRods: [
           BarChartRodData(
             toY: masc + fem + neut,
-            width: 32, // wider bars
+            width: 32, 
             borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
             rodStackItems: [
               BarChartRodStackItem(0, fem, const Color(0xFF9666A5)),
@@ -977,9 +949,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // Card 4: Ranking of Industries Based on Gender Bias — Horizontal bar
-  // ══════════════════════════════════════════════════════════════════════════
 Widget _buildRankingCard() {
   return _buildCard(
     child: Column(
@@ -1059,10 +1028,9 @@ Widget _buildRankingBars() {
 Widget _buildRankSection(List<MapEntry<String, double>> items, {required bool isMale}) {
   final maxVal = items.isEmpty ? 1.0 : items.first.value;
 
-  // Gradient colors from lightest (rank 1) to darkest (rank 10)
 final gradientColors = isMale
     ? const [
-        Color(0xFF4A2947), // rank 1 — darkest
+        Color(0xFF4A2947), 
         Color(0xFF573454),
         Color(0xFF643F61),
         Color(0xFF714A6E),
@@ -1071,10 +1039,10 @@ final gradientColors = isMale
         Color(0xFF986B95),
         Color(0xFFA576A2),
         Color(0xFFB281AF),
-        Color(0xFFBF8CBC), // rank 10 — lightest
+        Color(0xFFBF8CBC), 
       ]
     : const [
-        Color(0xFF3A0E52), // rank 1 — darkest
+        Color(0xFF3A0E52),
         Color(0xFF471A60),
         Color(0xFF54266E),
         Color(0xFF61327C),
@@ -1083,7 +1051,7 @@ final gradientColors = isMale
         Color(0xFF8856A6),
         Color(0xFF9562B4),
         Color(0xFFA26EC2),
-        Color(0xFFAF7AD0), // rank 10 — lightest
+        Color(0xFFAF7AD0), 
       ];
 
   return Column(
@@ -1157,7 +1125,6 @@ final gradientColors = isMale
   );
 }
 
-  // ── Main build ─────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Container(
