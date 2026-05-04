@@ -23,6 +23,7 @@ class DetectionPage extends StatefulWidget {
 class _DetectionPageState extends State<DetectionPage> {
   late TextEditingController _textController;
   BiasDetectionResult? _result;
+  BiasDetectionResult? _originalResult; 
   bool _isLoading = false;
   bool _isRewriting = false;
   String? _error;
@@ -32,6 +33,8 @@ class _DetectionPageState extends State<DetectionPage> {
   Map<String, bool> _suggestionLoading = {};
   Map<String, String?> _suggestionErrors = {};
   String? _hoveredWord;
+
+  Map<String, String> _rewrittenWords = {};
 
   late final ValueNotifier<int> _suggestionUpdateNotifier = ValueNotifier(0);
 
@@ -55,11 +58,11 @@ class _DetectionPageState extends State<DetectionPage> {
         _error = 'Please enter some text';
         _result = null;
       });
-        
       return;
     }
 
-    final wordCount = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    final wordCount =
+        text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
     if (wordCount < 30) {
       final savedText = text;
       setState(() {
@@ -75,10 +78,10 @@ class _DetectionPageState extends State<DetectionPage> {
             _error = null;
           });
         }
-      }); 
+      });
 
       return;
-    } 
+    }
 
     setState(() {
       _isLoading = true;
@@ -87,12 +90,14 @@ class _DetectionPageState extends State<DetectionPage> {
       _suggestionLoading.clear();
       _suggestionErrors.clear();
       _hoveredWord = null;
+      _rewrittenWords = {};
     });
 
     try {
       final result = await BiasDetectionService.detectBias(text);
       setState(() {
         _result = result;
+        _originalResult = result; 
         _isLoading = false;
       });
     } catch (e) {
@@ -120,17 +125,57 @@ class _DetectionPageState extends State<DetectionPage> {
       _suggestionLoading.clear();
       _suggestionErrors.clear();
       _hoveredWord = null;
+      _rewrittenWords = {};
     });
 
     try {
-      final rewriteResponse = await BiasDetectionService.rewriteJobAdToNeutral(text);
+      final rewriteResponse =
+          await BiasDetectionService.rewriteJobAdToNeutral(text);
       final rewrittenText = rewriteResponse['rewritten_text'] as String;
-      final detectionResult = rewriteResponse['detection_result'] as BiasDetectionResult;
+      final detectionResult =
+          rewriteResponse['detection_result'] as BiasDetectionResult;
+
+      final masculine = _getWords('masculine');
+      final feminine = _getWords('feminine');
+      final genderCodedWords = <String>{
+        ...masculine.map((w) => w.toLowerCase()),
+        ...feminine.map((w) => w.toLowerCase()),
+      };
+
+      final wordPattern = RegExp(r'\b[\w]+(?:-[\w]+)*\b');
+      
+      final originalWordMatches =
+          wordPattern.allMatches(text.toLowerCase()).map((m) => m.group(0)!).toSet();
+      final rewrittenWordMatches =
+          wordPattern.allMatches(rewrittenText.toLowerCase()).map((m) => m.group(0)!).toSet();
+
+      final removedGenderCodedWords = genderCodedWords
+          .where((w) => !rewrittenWordMatches.contains(w))
+          .toSet();
+
+      final newWordsInRewritten =
+          rewrittenWordMatches.difference(originalWordMatches);
+
+      final changed = <String, String>{};
+
+      if (removedGenderCodedWords.isNotEmpty && newWordsInRewritten.isNotEmpty) {
+        final replacedMasculine =
+            removedGenderCodedWords.any((w) => masculine.contains(w));
+        final replacedFeminine =
+            removedGenderCodedWords.any((w) => feminine.contains(w));
+
+        final genderType = replacedMasculine ? 'masculine' : 'feminine';
+
+        for (final newWord in newWordsInRewritten) {
+          changed[newWord] = genderType;
+        }
+      }
 
       setState(() {
         _textController.value = TextEditingValue(text: rewrittenText);
         _result = detectionResult;
         _isRewriting = false;
+        _rewrittenWords = changed;
       });
     } catch (e) {
       setState(() {
@@ -153,9 +198,10 @@ class _DetectionPageState extends State<DetectionPage> {
     }
   }
 
-  List<String> _getWords(String key) {
-    if (_result == null) return [];
-    final raw = _result!.flaggedPhrases[key];
+  List<String> _getWords(String key, {bool useOriginal = false}) {
+    final result = useOriginal ? _originalResult : _result;
+    if (result == null) return [];
+    final raw = result.flaggedPhrases[key];
     if (raw == null) return [];
     if (raw is List<String>) return raw;
     if (raw is List) return raw.map((e) => e.toString()).toList();
@@ -254,7 +300,9 @@ class _DetectionPageState extends State<DetectionPage> {
       _suggestions.clear();
       _suggestionLoading.clear();
       _suggestionErrors.clear();
+      _rewrittenWords = {};
       _result = null;
+      _originalResult = null;
     });
   }
 
@@ -299,8 +347,8 @@ class _DetectionPageState extends State<DetectionPage> {
   Widget _buildHighlightedTextDisplay() {
     final text = _textController.text;
     final textLower = text.toLowerCase();
-    final masculine = _getWords('masculine');
-    final feminine = _getWords('feminine');
+    final masculine = _getWords('masculine', useOriginal: true);
+    final feminine = _getWords('feminine', useOriginal: true);
 
     final plainStyle = _sharedTextStyle;
 
@@ -329,6 +377,22 @@ class _DetectionPageState extends State<DetectionPage> {
       }
     }
 
+
+    final coveredStarts = matches.map((e) => e.key).toSet();
+    for (final word in _rewrittenWords.keys) {
+      if (word.isEmpty) continue;
+      final pattern = RegExp(
+        r'\b' + RegExp.escape(word) + r'\b',
+        caseSensitive: false,
+      );
+      for (final match in pattern.allMatches(textLower)) {
+        if (!coveredStarts.contains(match.start)) {
+          matches.add(MapEntry(match.start, word));
+          coveredStarts.add(match.start);
+        }
+      }
+    }
+
     matches.sort((a, b) => a.key.compareTo(b.key));
 
     for (final match in matches) {
@@ -346,8 +410,16 @@ class _DetectionPageState extends State<DetectionPage> {
       }
 
       final isMasculine = masculine.contains(wordAtPos);
-      final underlineColor =
-          isMasculine ? const Color(0xFF8E7AB5) : const Color(0xFFB188B6);
+      final isFeminine = feminine.contains(wordAtPos);
+
+      final Color underlineColor;
+      if (isMasculine) {
+        underlineColor = const Color(0xFF8E7AB5);
+      } else if (isFeminine) {
+        underlineColor = const Color(0xFFB188B6);
+      } else {
+        underlineColor = const Color(0xFF7A5C9E);
+      }
 
       spans.add(
         TextSpan(
@@ -585,7 +657,8 @@ class _DetectionPageState extends State<DetectionPage> {
                                     style: GoogleFonts.poppins(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w700,
-                                      color: _getClassColor(_result!.detectedClass),
+                                      color: _getClassColor(
+                                          _result!.detectedClass),
                                     ),
                                   ),
                                 ],
@@ -808,10 +881,12 @@ class _DetectionPageState extends State<DetectionPage> {
       onPressed: () {
         setState(() {
           _result = null;
+          _originalResult = null;
           _suggestions.clear();
           _suggestionLoading.clear();
           _suggestionErrors.clear();
           _hoveredWord = null;
+          _rewrittenWords = {};
         });
       },
       style: ButtonStyle(
@@ -856,52 +931,65 @@ class _DetectionPageState extends State<DetectionPage> {
   }
 
   Widget _buildRewriteButton() {
-    return ElevatedButton(
-      onPressed: _isRewriting ? null : _rewriteToNeutral,
-      style: ButtonStyle(
-        padding: MaterialStateProperty.all(
-          const EdgeInsets.symmetric(horizontal: 80, vertical: 18),
-        ),
-        elevation: MaterialStateProperty.all(4),
-        backgroundColor:
-            MaterialStateProperty.resolveWith<Color>((states) {
-          if (states.contains(MaterialState.disabled)) {
-            return const Color(0xFFB188B6).withOpacity(0.6);
-          }
-          return states.contains(MaterialState.hovered)
-              ? const Color(0xFF3A0E52)
-              : const Color(0xFFB188B6);
-        }),
-        foregroundColor: MaterialStateProperty.resolveWith<Color>(
-          (states) => states.contains(MaterialState.hovered)
-              ? const Color(0xFFB188B6)
-              : const Color(0xFF280647),
-        ),
-        shape: MaterialStateProperty.resolveWith<OutlinedBorder>(
-          (states) => RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(30),
-            side: BorderSide(
-              color: states.contains(MaterialState.hovered)
-                  ? const Color(0xFFB188B6)
-                  : const Color(0xFF280647),
-              width: 2.5,
-            ),
+    final bool isNeutral = _result?.detectedClass == 'Neutral';
+    final bool isDisabled = _isRewriting || isNeutral;
+
+    return Tooltip(
+      message: isNeutral ? 'Text is already gender neutral' : '',
+      child: ElevatedButton(
+        onPressed: isDisabled ? null : _rewriteToNeutral,
+        style: ButtonStyle(
+          padding: MaterialStateProperty.all(
+            const EdgeInsets.symmetric(horizontal: 80, vertical: 18),
           ),
-        ),
-      ),
-      child: _isRewriting
-          ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Text(
-              'REWRITE',
-              style: GoogleFonts.poppins(
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
+          elevation: MaterialStateProperty.all(4),
+          backgroundColor:
+              MaterialStateProperty.resolveWith<Color>((states) {
+            if (states.contains(MaterialState.disabled)) {
+              return const Color(0xFFB188B6).withOpacity(0.4);
+            }
+            return states.contains(MaterialState.hovered)
+                ? const Color(0xFF3A0E52)
+                : const Color(0xFFB188B6);
+          }),
+          foregroundColor: MaterialStateProperty.resolveWith<Color>((states) {
+            if (states.contains(MaterialState.disabled)) {
+              return const Color(0xFF280647).withOpacity(0.4); 
+            }
+            return states.contains(MaterialState.hovered)
+                ? const Color(0xFFD4B5E8)
+                : const Color(0xFF280647);
+          }),
+          shape: MaterialStateProperty.resolveWith<OutlinedBorder>((states) {
+            final Color borderColor = states.contains(MaterialState.disabled)
+                ? const Color(0xFF280647).withOpacity(0.2)
+                : (states.contains(MaterialState.hovered)
+                    ? const Color(0xFFD4B5E8)
+                    : const Color(0xFF280647));
+            
+            return RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(30),
+              side: BorderSide(
+                color: borderColor,
+                width: 2.5,
               ),
-            ),
+            );
+          }),
+        ),
+        child: _isRewriting
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Text(
+                'REWRITE',
+                style: GoogleFonts.poppins(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+      ),
     );
   }
 }
