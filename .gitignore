@@ -58,3 +58,22 @@ random_forest.pkl
 mann_kendall_results.csv
 mann_kendall_summary_wide.csv
 timeseries_with_trend.csv
+
+# Python virtual environments
+venv/
+ENV/
+env/
+.venv
+*.egg-info/
+*.egg
+
+# HF Spaces cache
+.cache/
+.gradio_cached_examples/
+
+# Node dependencies (if used)
+node_modules/
+npm-debug.log
+
+# Vercel build output
+.vercel/
