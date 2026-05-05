@@ -302,21 +302,24 @@ class _TeamSection extends StatelessWidget {
   static const _members = [
     _MemberData(
       name: 'LAO, Vencer A.',
-      role: 'Performance Evaluator',
+      role: 'Web Developer',
       description:
-          'Tests and analyzes the model\'s accuracy, efficiency, and reliability, ensuring it meets performance standards.',
+          'Spearheads the system\’s web development framework and user interface, ensuring a seamless and intuitive user experience. Responsible for establishing the foundational data dictionary of gender-coded words, defining the linguistic parameters used for detection. Facilitated the technical implementation of the gender-neutral rewriting API, optimizing the integration pipeline to ensure real-time text transformations are both technically robust and inclusive.\n\n\n\n',
+      imagePath: 'assets/images/vencer.jpg',
     ),
     _MemberData(
       name: 'BARBACENA, Jenny B.',
-      role: 'Data Specialist',
+      role: 'Data Analyst',
       description:
-          'Collects, cleans, and organizes datasets to ensure high-quality input for model training and evaluation',
+          'Handles historical data collection, preprocessing, and temporal analysis of over 427,000 job advertisement entries. Responsible for conducting exploratory data analysis, performing Mann-Kendall trend analysis to identify patterns of gender bias across ten industries over a ten-year period, and developing the analytics dashboard of the web application.\n\n\n\n\n\n\n\n',
+      imagePath: 'assets/images/jenny.jpg',
     ),
     _MemberData(
       name: 'MIRANDA, Maria Lourdes S.',
-      role: 'Model Developer',
+      role: 'Machine Learning &\n Data Engineer',
       description:
-          'Designs, implements, and trains machine learning models to detect gaze and engagement accurately.',
+          'Responsible for the end-to-end development of the system, including the design and implementation of web scraping pipelines to collect and construct a dataset of job advertisements. Handled data preprocessing, cleaning, and structuring of raw scraped data for model training. Developed and trained the machine learning model for gender bias detection, including experimentation, iteration, and performance optimization. Also contributed to the implementation of the model integration pipeline used for classification and prediction within the system.',
+      imagePath: 'assets/images/lourdes.jpg',
     ),
   ];
 
@@ -356,10 +359,12 @@ class _MemberData {
   final String name;
   final String role;
   final String description;
+  final String imagePath;
   const _MemberData({
     required this.name,
     required this.role,
     required this.description,
+    required this.imagePath,
   });
 }
 
@@ -370,13 +375,13 @@ class _TeamCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 220,
+      width: 280,
       child: Stack(
         clipBehavior: Clip.none,
         alignment: Alignment.topCenter,
         children: [
           Container(
-            margin: const EdgeInsets.only(top: 55),
+            margin: const EdgeInsets.only(top: 75),
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.85),
               borderRadius: BorderRadius.circular(16),
@@ -389,36 +394,36 @@ class _TeamCard extends StatelessWidget {
                 ),
               ],
             ),
-            padding: const EdgeInsets.fromLTRB(16, 60, 16, 20),
+            padding: const EdgeInsets.fromLTRB(20, 80, 20, 24),
             child: Column(
               children: [
                 Text(
                   member.name,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 15,
                     fontWeight: FontWeight.bold,
                     decoration: TextDecoration.underline,
                     color: Color(0xFF2A1040),
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Text(
                   member.role,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 14,
                     fontStyle: FontStyle.italic,
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF3D1A6B),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 Text(
                   member.description,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 13,
                     color: Color(0xFF444444),
                     height: 1.5,
                     fontStyle: FontStyle.italic,
@@ -430,14 +435,21 @@ class _TeamCard extends StatelessWidget {
           Positioned(
             top: 0,
             child: Container(
-              width: 110,
-              height: 110,
+              width: 140,
+              height: 140,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(color: const Color(0xFF7B3FA0), width: 3),
                 color: const Color(0xFFE8D4F1),
               ),
-              child: const Icon(Icons.person, size: 64, color: Color(0xFF7B3FA0)),
+              child: ClipOval(
+                child: Image.asset(
+                  member.imagePath,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.center,
+                  filterQuality: FilterQuality.high,
+                ),
+              ),
             ),
           ),
         ],
@@ -463,7 +475,7 @@ class _FooterSection extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const Text(
-            '© 2025 AdJust. All rights reserved.',
+            '© 2026 AdJust. All rights reserved.',
             style: TextStyle(fontSize: 13, color: Color(0xFF555555)),
           ),
           const SizedBox(width: 12),

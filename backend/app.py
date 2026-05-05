@@ -51,7 +51,7 @@ print(f"[Model] Expects {rf_model.n_features_in_} features from embeddings")
 print(f"[Model] Label encoder classes: {list(label_encoder.classes_)}")
 print(f"[Model] Class name mapping enabled for frontend compatibility")
 
-WORD_DICTIONARY = {} 
+WORD_DICTIONARY = {}
 dict_path = os.path.join(model_dir, 'data_dictionary.csv')
 
 if os.path.exists(dict_path):
@@ -108,7 +108,7 @@ def get_embeddings(text, max_length=512):
 
                 mask = inputs["attention_mask"].unsqueeze(-1).float()
                 embedding = (outputs.last_hidden_state * mask).sum(1) / mask.sum(1)
-                embedding = embedding.numpy().flatten() 
+                embedding = embedding.numpy().flatten()
 
             tokens   = text.split()
             norm_len = min(len(tokens), max_length) / max_length
@@ -164,7 +164,6 @@ def _build_neutral_alternatives_from_dict() -> dict:
     """
     Build a word → neutral-alternative mapping leveraging:
     - Explicit neutral equivalents listed adjacent in the CSV
-      (e.g. 'businessman' → 'business executive', 'anchorman' → 'anchorperson')
     - Stem-based matching for gendered job titles
     - A curated fallback table for common trait/adjective words
     """
@@ -178,10 +177,10 @@ def _build_neutral_alternatives_from_dict() -> dict:
         (r'women$',     'people'),
         (r'man\b',      'person'),
         (r'men\b',      'people'),
-        (r'ess$',       ''),       
-        (r'ette$',      ''),      
-        (r'rix$',       'r'),     
-        (r'tress$',     'tor'),   
+        (r'ess$',       ''),
+        (r'ette$',      ''),
+        (r'rix$',       'r'),
+        (r'tress$',     'tor'),
     ]
 
     generated = {}
@@ -469,7 +468,10 @@ def extract_flagged_phrases(text: str) -> dict:
     - Single words: ALWAYS word-boundary regex to prevent false positives
 
     Returns:
-        {"masculine": ["word1", ...], "feminine": ["word1", ...]}
+        {
+            "masculine": [{"word": "...", "source": "..."}, ...],
+            "feminine":  [{"word": "...", "source": "..."}, ...]
+        }
     """
     text_lower = text.lower()
     text_lower = (
@@ -484,30 +486,44 @@ def extract_flagged_phrases(text: str) -> dict:
         pattern = r'\b' + re.escape(keyword) + r'\b'
         return bool(re.search(pattern, text_lower))
 
-    masculine = sorted({kw for kw in _MASCULINE_KEYWORDS if _matches(kw)})
-    feminine  = sorted({kw for kw in _FEMININE_KEYWORDS  if _matches(kw)})
+    masculine_words = sorted({kw for kw in _MASCULINE_KEYWORDS if _matches(kw)})
+    feminine_words  = sorted({kw for kw in _FEMININE_KEYWORDS  if _matches(kw)})
+
+    masculine = [
+        {
+            'word':   w,
+            'source': WORD_DICTIONARY.get(w, {}).get('source', ''),
+        }
+        for w in masculine_words
+    ]
+
+    feminine = [
+        {
+            'word':   w,
+            'source': WORD_DICTIONARY.get(w, {}).get('source', ''),
+        }
+        for w in feminine_words
+    ]
 
     return {'masculine': masculine, 'feminine': feminine}
+
+
+def _plain_flagged_words(flagged: dict) -> dict:
+    """
+    Helper: converts enriched flagged_phrases back to plain word lists.
+    Used internally for keyword counting and rewrite logic that expects
+    the {"masculine": ["word", ...]} format.
+    """
+    return {
+        'masculine': [e['word'] for e in flagged.get('masculine', [])],
+        'feminine':  [e['word'] for e in flagged.get('feminine',  [])],
+    }
 
 
 def apply_dictionary_substitutions(text: str, max_expansion_ratio: float = 1.5) -> tuple[str, list[dict]]:
     """
     Apply validated neutral substitutions directly from NEUTRAL_ALTERNATIVES
     before sending the text to Groq, with intelligent length preservation.
-
-    Strategy:
-    - Longer / multi-word phrases are matched first to avoid partial clobbering.
-    - Preserves original capitalisation (Title Case, ALL CAPS, lowercase).
-    - Word-boundary regex prevents substring false-positives for single words.
-    - SKIP replacements that expand length excessively (> max_expansion_ratio)
-    
-    Args:
-        text: The input text to process
-        max_expansion_ratio: Max allowed length expansion (default 1.5x). 
-                            E.g., "it" (2 chars) won't replace with something >3 chars.
-
-    Returns:
-        (substituted_text, list_of_changes)
     """
     changes = []
     result  = text
@@ -519,9 +535,9 @@ def apply_dictionary_substitutions(text: str, max_expansion_ratio: float = 1.5) 
 
         orig_len = len(biased_term)
         new_len = len(neutral_term)
-        
+
         if orig_len <= 3 and new_len > orig_len + 2:
-            continue  
+            continue
         elif orig_len > 3 and new_len > orig_len * max_expansion_ratio:
             print(f"[dict_sub] SKIPPING excessive expansion: '{biased_term}' ({orig_len}) → '{neutral_term}' ({new_len})")
             continue
@@ -643,7 +659,10 @@ def detect_bias():
     Response: {
         "detected_class": "Male"|"Female"|"Neutral",
         "confidence_scores": {"Male": 0.0, "Female": 0.0, "Neutral": 0.0},
-        "flagged_phrases": {"masculine": [...], "feminine": [...]},
+        "flagged_phrases": {
+            "masculine": [{"word": "...", "source": "..."}, ...],
+            "feminine":  [{"word": "...", "source": "..."}, ...]
+        },
         "accuracy_note": "..."
     }
     """
@@ -670,9 +689,10 @@ def detect_bias():
             confidence_scores[mapped_class_name] = float(probabilities[i])
 
         flagged_phrases = extract_flagged_phrases(text)
+        plain_words     = _plain_flagged_words(flagged_phrases)
 
-        masculine_count = len(flagged_phrases['masculine'])
-        feminine_count  = len(flagged_phrases['feminine'])
+        masculine_count = len(plain_words['masculine'])
+        feminine_count  = len(plain_words['feminine'])
         neutral_score   = confidence_scores.get('Neutral', 0)
 
         if (predicted_class == 'Male'
@@ -686,10 +706,10 @@ def detect_bias():
             predicted_class = 'Neutral'
 
         return jsonify({
-            'detected_class': predicted_class,
+            'detected_class':    predicted_class,
             'confidence_scores': confidence_scores,
-            'flagged_phrases': flagged_phrases,
-            'accuracy_note': f"Model Accuracy: {config.get('accuracy', 'N/A')}%, Macro F1: {config.get('macro_f1', 'N/A')}%",
+            'flagged_phrases':   flagged_phrases,
+            'accuracy_note':     f"Model Accuracy: {config.get('accuracy', 'N/A')}%, Macro F1: {config.get('macro_f1', 'N/A')}%",
         }), 200
 
     except Exception as e:
@@ -884,9 +904,10 @@ def batch_detect():
                 confidence_scores[mapped_class_name] = float(probabilities[i])
 
             flagged_phrases = extract_flagged_phrases(text)
+            plain_words     = _plain_flagged_words(flagged_phrases)
 
-            masculine_count = len(flagged_phrases['masculine'])
-            feminine_count  = len(flagged_phrases['feminine'])
+            masculine_count = len(plain_words['masculine'])
+            feminine_count  = len(plain_words['feminine'])
             neutral_score   = confidence_scores.get('Neutral', 0)
 
             if (predicted_class == 'Male'
@@ -900,28 +921,28 @@ def batch_detect():
                 predicted_class = 'Neutral'
 
             results.append({
-                'text': text,
-                'detected_class': predicted_class,
+                'text':              text,
+                'detected_class':    predicted_class,
                 'confidence_scores': confidence_scores,
-                'flagged_phrases': flagged_phrases,
+                'flagged_phrases':   flagged_phrases,
             })
 
         return jsonify({'results': results}), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    
+
 
 def _build_substitution_reference(changes: list[dict], remaining_flagged: dict) -> str:
     """
     Build a concise substitution reference block to inject into the Groq prompt.
-    Tells Groq exactly what was already changed and what still needs attention.
+    Includes source metadata for remaining flagged words to give Groq richer context.
     """
     lines = []
 
     if changes:
         lines.append("SUBSTITUTIONS ALREADY APPLIED (do NOT undo these):")
-        for c in changes[:30]: 
+        for c in changes[:30]:
             lines.append(f"  • \"{c['original']}\" → \"{c['replacement']}\"")
 
     remaining_m = remaining_flagged.get('masculine', [])
@@ -929,154 +950,272 @@ def _build_substitution_reference(changes: list[dict], remaining_flagged: dict) 
 
     if remaining_m or remaining_f:
         lines.append("\nSTILL-FLAGGED WORDS REQUIRING NEUTRAL REPLACEMENT:")
-        for w in remaining_m[:20]:
-            alt = NEUTRAL_ALTERNATIVES.get(w, "<find neutral alternative>")
-            lines.append(f"  • [masculine] \"{w}\" → suggest: \"{alt}\"")
-        for w in remaining_f[:20]:
-            alt = NEUTRAL_ALTERNATIVES.get(w, "<find neutral alternative>")
-            lines.append(f"  • [feminine]  \"{w}\" → suggest: \"{alt}\"")
+        for entry in remaining_m[:20]:
+            word = entry['word'] if isinstance(entry, dict) else entry
+            alt  = NEUTRAL_ALTERNATIVES.get(word, "<find neutral alternative>")
+            src  = entry.get('source', '') if isinstance(entry, dict) else ''
+            src_note = f" [source: {src}]" if src else ""
+            lines.append(f"  • [masculine] \"{word}\" → suggest: \"{alt}\"{src_note}")
+        for entry in remaining_f[:20]:
+            word = entry['word'] if isinstance(entry, dict) else entry
+            alt  = NEUTRAL_ALTERNATIVES.get(word, "<find neutral alternative>")
+            src  = entry.get('source', '') if isinstance(entry, dict) else ''
+            src_note = f" [source: {src}]" if src else ""
+            lines.append(f"  • [feminine]  \"{word}\" → suggest: \"{alt}\"{src_note}")
 
     return "\n".join(lines)
 
 
 def _validate_rewrite_length(original: str, rewritten: str, max_growth: float = 1.15) -> tuple[bool, str]:
-    """
-    Validate that the rewritten text doesn't expand excessively.
-    
-    Returns:
-        (is_valid, reason)
-    where is_valid=True if expansion is acceptable, False if too verbose.
-    
-    Args:
-        original: Original text
-        rewritten: Rewritten text
-        max_growth: Max allowed growth ratio (default 1.15 = 15% expansion)
-    """
     orig_len = len(original)
-    new_len = len(rewritten)
-    
+    new_len  = len(rewritten)
     growth_ratio = new_len / orig_len if orig_len > 0 else 1.0
-    
     if growth_ratio > max_growth:
         excess = ((growth_ratio - 1) * 100)
         return False, f"Excessive expansion: {excess:.1f}% over limit ({new_len} chars vs {orig_len} original)"
-    
     return True, f"Length OK: {growth_ratio:.2f}x ({new_len}/{orig_len} chars)"
 
 
 def apply_residual_cleanup(text: str, original_text: str, max_iterations: int = 3) -> tuple[str, list[dict], bool]:
     """
     Apply cleanup passes to remove any remaining biased words detected after LLM rewrite.
-    
-    Validates that cleanup doesn't cause excessive expansion.
-    
-    Returns:
-        (cleaned_text, cleanup_changes, was_successful)
+    Uses enriched flagged_phrases and _plain_flagged_words for accurate residual tracking.
     """
     current_text = text
     all_cleanup_changes = []
-    
+
     for iteration in range(max_iterations):
-        flagged = extract_flagged_phrases(current_text)
-        flagged_count = len(flagged['masculine']) + len(flagged['feminine'])
-        
+        flagged       = extract_flagged_phrases(current_text)
+        plain         = _plain_flagged_words(flagged)
+        flagged_count = len(plain['masculine']) + len(plain['feminine'])
+
         if flagged_count == 0:
             print(f"[cleanup] Iteration {iteration + 1}: No flagged words remaining — cleanup complete")
             break
-        
+
         print(f"[cleanup] Iteration {iteration + 1}: Found {flagged_count} flagged words, applying substitutions...")
-        
+
         next_text, changes = apply_dictionary_substitutions(current_text, max_expansion_ratio=1.3)
-        
+
         if not changes:
             print(f"[cleanup] Iteration {iteration + 1}: No substitutions applied — cleanup stopped")
             break
-        
+
         is_valid, reason = _validate_rewrite_length(original_text, next_text, max_growth=1.20)
-        
+
         if not is_valid:
             print(f"[cleanup] Iteration {iteration + 1}: {reason} — stopping cleanup to prevent excessive expansion")
             break
-        
+
         current_text = next_text
         all_cleanup_changes.extend(changes)
         print(f"[cleanup] Iteration {iteration + 1}: Applied {len(changes)} substitutions — {reason}")
-    
+
     return current_text, all_cleanup_changes, len(all_cleanup_changes) > 0
+
+
+def _run_targeted_llm_cleanup(
+    text: str,
+    remaining_flagged: dict,
+    original_len: int,
+) -> str:
+    """
+    Second focused Groq pass: surgically neutralise only the words that
+    survived dictionary cleanup. Sends a compact diff-style prompt so the
+    model touches as little as possible.
+
+    Args:
+        text:              The partially-rewritten job ad text.
+        remaining_flagged: Enriched flagged_phrases dict (with 'word'/'source').
+        original_len:      Character length of the original job ad (for guard).
+
+    Returns:
+        Cleaned text (or the original `text` unchanged on any error).
+    """
+    plain = _plain_flagged_words(remaining_flagged)
+    targets_m = plain['masculine']
+    targets_f = plain['feminine']
+
+    if not targets_m and not targets_f:
+        return text
+
+    # Build a compact replacement instruction table
+    replacement_lines = []
+    for w in targets_m:
+        alt = NEUTRAL_ALTERNATIVES.get(w, "<gender-neutral alternative>")
+        replacement_lines.append(f'  • [masculine] "{w}" → "{alt}"')
+    for w in targets_f:
+        alt = NEUTRAL_ALTERNATIVES.get(w, "<gender-neutral alternative>")
+        replacement_lines.append(f'  • [feminine]  "{w}" → "{alt}"')
+
+    replacement_block = "\n".join(replacement_lines)
+
+    system_prompt = (
+        "You are a precision editor specialising in gender-neutral language. "
+        "Your ONLY task is to replace the exact words listed below with their "
+        "specified gender-neutral alternatives. "
+        "Do NOT change anything else — no rephrasing, no restructuring, no additions. "
+        "Preserve all formatting, punctuation, and capitalisation conventions exactly. "
+        "Return ONLY the corrected text."
+    )
+
+    user_prompt = (
+        f"Replace ONLY these specific words/phrases in the text below:\n\n"
+        f"{replacement_block}\n\n"
+        f"TEXT:\n{text}\n\n"
+        f"Return the text with ONLY those replacements made. Nothing else changed."
+    )
+
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            max_tokens=2000,
+            temperature=0.0,   # deterministic — we want exact replacements only
+        )
+
+        result = response.choices[0].message.content.strip()
+
+        if not result:
+            print("[targeted_llm_cleanup] Empty response — keeping existing text")
+            return text
+
+        # Guard: reject if the LLM expanded significantly
+        is_valid, reason = _validate_rewrite_length(
+            text, result, max_growth=1.10
+        )
+        if not is_valid:
+            print(f"[targeted_llm_cleanup] {reason} — discarding LLM result")
+            return text
+
+        print(f"[targeted_llm_cleanup] Success — {reason}")
+        return result
+
+    except Exception as e:
+        print(f"[targeted_llm_cleanup] Error: {e} — keeping existing text")
+        return text
 
 
 def _build_rewrite_system_prompt() -> str:
     return (
-        "You are an expert in gender-neutral language for job advertisements "
-        "in the Philippine market. Your goal: rewrite job ads to be inclusive and neutral.\n\n"
+        "You are an expert editor specialising in gender-neutral language for job "
+        "advertisements in the Philippine market. Your goal: produce a fully inclusive, "
+        "gender-neutral rewrite that a hiring manager would be proud to publish.\n\n"
 
-        "CRITICAL RULES (apply rigorously but conservatively):\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "MANDATORY REPLACEMENTS (zero exceptions):\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
-        "1. PRONOUNS: he→they, she→they, him→them, her→them, his→their, hers→theirs\n"
-        "   Use singular 'they' consistently.\n\n"
+        "PRONOUNS — replace every instance without exception:\n"
+        "  he → they          she → they\n"
+        "  him → them         her → them\n"
+        "  his → their        hers → theirs\n"
+        "  himself → themselves   herself → themselves\n"
+        "  Use singular 'they/them/their' consistently throughout.\n\n"
 
-        "2. GENDERED JOB TITLES:\n"
-        "   anchorman→news anchor  |  stewardess→flight attendant\n"
-        "   salesman→salesperson   |  chairman→chairperson\n"
-        "   fireman→firefighter    |  cameraman→camera operator\n"
-        "   businessman→business professional\n\n"
+        "HONORIFICS:\n"
+        "  Mr. / Mrs. / Miss / Ms. → Mx.   |   Sir / Madam → Mx.\n\n"
 
-        "3. AVOID GENDERED ROLE NOUNS:\n"
-        "   Don't use 'man', 'woman', 'girl', 'boy' to describe roles.\n"
-        "   Exception: biological context (pregnancy, childcare) — use anatomically accurate terms.\n\n"
+        "GENDERED JOB TITLES — use inclusive equivalents:\n"
+        "  anchorman → news anchor         stewardess → flight attendant\n"
+        "  salesman → salesperson          salesgirl/salesgirls → sales staff\n"
+        "  chairman/chairwoman → chairperson\n"
+        "  fireman/firemen → firefighter/firefighters\n"
+        "  cameraman → camera operator     policeman → police officer\n"
+        "  congressman → congress member   spokesman → spokesperson\n"
+        "  foremen → supervisors           workmen → workers\n"
+        "  businessman/businesswoman → business professional\n"
+        "  repairmen → repair technicians  watchmen → security guards\n"
+        "  waitress → server               hostess → host\n"
+        "  draftsmen → drafters            craftsmen → craftspeople\n"
+        "  fishermen → fisherfolk          statesman/statesmen → leader/leaders\n\n"
 
-        "4. TRAIT WORDS (minimal substitution — only when context requires):\n"
-        "   If a trait word appears biased in context, replace conservatively:\n"
-        "   aggressive→assertive or focused (choose shortest neutral form)\n"
-        "   nurturing→caring or supportive (preserve meaning)\n"
-        "   Note: NOT every adjective needs replacement. Replace only if genuinely biased.\n\n"
+        "GENDERED ROLE NOUNS — never use these to describe a role or candidate:\n"
+        "  man, men, woman, women, boy, girl, guy, gal\n"
+        "  Exception: biological/medical context only.\n\n"
 
-        "5. GENDERED PHRASES:\n"
-        "   'best man for the job'→'best person for the job'\n"
-        "   'manpower'→'workforce'  |  'manning'→'staffing'\n\n"
+        "COMPOUND GENDERED WORDS:\n"
+        "  manpower → workforce     manning → staffing\n"
+        "  man-made → manufactured  man-hour → work-hour\n"
+        "  mankind → humankind      layman → layperson\n"
+        "  middleman → intermediary\n\n"
 
-        "6. LEAVE TERMINOLOGY:\n"
-        "   maternity/paternity leave→parental leave\n\n"
+        "LEAVE TERMINOLOGY:\n"
+        "  maternity leave / paternity leave → parental leave\n\n"
 
-        "PRESERVATION RULES:\n"
+        "GENDERED PHRASES:\n"
+        "  'best man for the job' → 'best person for the job'\n"
+        "  'man up' → 'step up'\n"
+        "  'manning the desk/phones/etc.' → 'staffing the desk/phones/etc.'\n"
+        "  'brotherhood' → 'community'\n\n"
+
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "• Keep original structure, formatting, bullet points, sections\n"
-        "• Preserve ALL technical requirements, qualifications, salary, benefits\n"
-        "• Maintain tone and register (formal, casual, corporate, startup)\n"
-        "• Keep length similar to original (avoid verbose expansion)\n"
-        "• Do NOT add preambles, explanations, or disclaimers\n\n"
+        "CONTEXTUAL REPLACEMENTS (apply when clearly biased in context):\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
+        "MASCULINE-CODED TRAITS — replace only when the wording skews masculine:\n"
+        "  aggressive → assertive / proactive\n"
+        "  dominant / dominate → authoritative / lead\n"
+        "  competitive → results-driven\n"
+        "  ninja / rockstar / jedi / guru / superhero → expert / top performer / specialist\n\n"
+
+        "FEMININE-CODED TRAITS — replace only when the wording skews feminine:\n"
+        "  nurturing → supportive\n"
+        "  gentle → tactful\n"
+        "  warm (as a role descriptor) → approachable\n\n"
+
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "PRESERVATION RULES (must not be violated):\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "• Preserve ALL original structure: headings, bullet points, sections, spacing\n"
+        "• Keep every technical requirement, qualification, salary figure, and benefit\n"
+        "• Maintain the original tone and register (formal, startup-casual, corporate)\n"
+        "• Do NOT add preambles, disclaimers, explanations, or equal-opportunity statements\n"
+        "• Do NOT remove or paraphrase requirements — only neutralise gendered language\n\n"
+
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "LENGTH CONSTRAINT:\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Rewritten version should be ±10% of original length.\n"
-        "Never expand short phrases into verbose alternatives.\n\n"
+        "Rewritten version must be within ±10% of the original character length.\n"
+        "Prefer the shortest neutral replacement that preserves meaning.\n\n"
+
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "SELF-CHECK before outputting (scan the draft once):\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "☐ Zero gendered pronouns remain (he/she/him/her/his/hers/himself/herself)\n"
+        "☐ Zero gendered honorifics remain (Mr./Mrs./Miss/Sir/Madam)\n"
+        "☐ Zero gendered job titles remain\n"
+        "☐ Zero gendered role nouns used to describe a candidate\n"
+        "☐ Gendered compound words replaced (manpower, man-made, etc.)\n"
+        "☐ Leave terms unified to 'parental leave'\n"
+        "☐ Length within ±10% of original\n\n"
 
         "OUTPUT:\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Return ONLY the complete rewritten job ad. No preamble, explanation, or prefix."
+        "Return ONLY the complete rewritten job ad. "
+        "No preamble, no explanation, no prefix, no suffix."
     )
 
 
 def _build_rewrite_user_prompt(pre_substituted_text: str, substitution_ref: str) -> str:
     return (
-        "Rewrite this job advertisement to be gender-neutral. "
-        "Apply the rules conservatively—only replace genuinely biased language.\n\n"
-        
-        "ALREADY SUBSTITUTED (do NOT undo):\n"
+        "Rewrite the job advertisement below to be fully gender-neutral.\n\n"
+
+        "CONTEXT ON WHAT HAS ALREADY BEEN DONE:\n"
         f"{substitution_ref}\n\n"
-        
-        "ORIGINAL TEXT:\n"
-        f"{pre_substituted_text}\n"
-        
-        "QUICK CHECKLIST before finalizing:\n"
-        "☐ No he/she/him/her/his/hers/himself/herself pronouns\n"
-        "☐ No gendered job titles (anchorman, stewardess, salesman, etc.)\n"
-        "☐ No gendered role nouns (man, woman, girl, boy as roles)\n"
-        "☐ No obviously biased trait words (aggressive, nurturing, etc.)\n"
-        "☐ Gendered phrases replaced (best man→best person, manpower→workforce)\n"
-        "☐ Length similar to original (no excessive expansion)\n\n"
-        
+
+        "YOUR TASK:\n"
+        "1. Address every item in the STILL-FLAGGED list above.\n"
+        "2. Hunt for any remaining gendered pronouns, titles, or role nouns "
+        "that were NOT caught by the pre-substitution pass and neutralise them.\n"
+        "3. Apply the MANDATORY REPLACEMENTS from your instructions to anything missed.\n"
+        "4. Run your internal SELF-CHECK before finalising.\n\n"
+
+        "JOB ADVERTISEMENT:\n"
+        f"{pre_substituted_text}\n\n"
+
         "Return ONLY the rewritten job ad."
     )
 
@@ -1086,34 +1225,36 @@ def rewrite_gender_neutral():
     """
     Rewrite an entire job advertisement to be completely gender-neutral.
 
-    Improvement: two-pass pipeline with length validation
-    ───────────────────────────────────────────────────────
-    Pass 1 (deterministic):
-        apply_dictionary_substitutions() replaces known biased terms using
-        the validated NEUTRAL_ALTERNATIVES map, with length-aware filtering
-        to prevent excessive text expansion.
+    Three-pass pipeline:
+    ────────────────────────────────────────────────────────────────
+    Pass 1 — Deterministic dictionary substitution:
+        apply_dictionary_substitutions() replaces all known biased terms
+        using NEUTRAL_ALTERNATIVES, with length-aware guards.
 
-    Pass 2 (LLM):
-        Groq receives the pre-substituted text with:
-        - Explicit guidance to preserve length (±10% of original)
-        - List of already-substituted terms (to prevent undoing)
-        - Structured prompt with essential rules only (not comprehensive)
+    Pass 2 — LLM rewrite (Groq / Llama-3.1-8b):
+        Receives the pre-substituted text with:
+        • Enriched substitution reference (what changed + what remains, with source)
+        • Mandatory replacement rules covering pronouns, titles, compounds, phrases
+        • Contextual replacement guidance for trait words
+        • Explicit self-check instructions before the model finalises output
 
-    Validation:
-        After LLM rewrite, check length expansion. If rewritten text expanded >15%,
-        apply targeted cleanup with expansion guards.
+    Pass 3 — Residual cleanup:
+        a) Dictionary substitution pass (up to 3 iterations) for anything the LLM missed.
+        b) Targeted LLM micro-rewrite if flagged words still remain after (a),
+           using a surgical diff-style prompt at temperature=0 to touch only
+           the specific remaining words.
 
     Request:  { "text": "<full job advertisement>" }
     Response: {
-        "original_text": "...",
-        "rewritten_text": "...",
-        "detected_class": "Male"|"Female"|"Neutral",
-        "confidence_scores": {...},
-        "flagged_phrases": {...},
+        "original_text":            "...",
+        "rewritten_text":           "...",
+        "detected_class":           "Male"|"Female"|"Neutral",
+        "confidence_scores":        {...},
+        "flagged_phrases":          {...},
         "pre_substitution_changes": [...],
-        "length_expansion_ratio": 1.05,
-        "cleanup_applied": true|false,
-        "accuracy_note": "..."
+        "length_expansion_ratio":   1.05,
+        "cleanup_applied":          true|false,
+        "accuracy_note":            "..."
     }
     """
     try:
@@ -1127,6 +1268,7 @@ def rewrite_gender_neutral():
 
         original_text_len = len(text)
 
+        # ── Pass 1: deterministic dictionary substitution ──────────────────
         pre_substituted, changes = apply_dictionary_substitutions(text, max_expansion_ratio=1.5)
 
         print(f"[/rewrite] Pass 1: {len(changes)} substitutions applied")
@@ -1134,12 +1276,14 @@ def rewrite_gender_neutral():
             print(f"  '{c['original']}' → '{c['replacement']}' (×{c['count']})")
 
         remaining_flagged = extract_flagged_phrases(pre_substituted)
-        remaining_count   = len(remaining_flagged['masculine']) + len(remaining_flagged['feminine'])
+        remaining_plain   = _plain_flagged_words(remaining_flagged)
+        remaining_count   = len(remaining_plain['masculine']) + len(remaining_plain['feminine'])
         print(f"[/rewrite] Pass 1 residual flagged words: {remaining_count}")
 
-        substitution_ref  = _build_substitution_reference(changes, remaining_flagged)
-        system_prompt     = _build_rewrite_system_prompt()
-        user_prompt       = _build_rewrite_user_prompt(pre_substituted, substitution_ref)
+        # ── Pass 2: LLM rewrite ────────────────────────────────────────────
+        substitution_ref = _build_substitution_reference(changes, remaining_flagged)
+        system_prompt    = _build_rewrite_system_prompt()
+        user_prompt      = _build_rewrite_user_prompt(pre_substituted, substitution_ref)
 
         try:
             response = groq_client.chat.completions.create(
@@ -1149,7 +1293,7 @@ def rewrite_gender_neutral():
                     {"role": "user",   "content": user_prompt},
                 ],
                 max_tokens=2000,
-                temperature=0.2,  
+                temperature=0.2,
             )
 
             rewritten_text = response.choices[0].message.content.strip()
@@ -1169,27 +1313,45 @@ def rewrite_gender_neutral():
             return jsonify({'error': 'Rewrite service error'}), 502
 
         is_length_valid, length_reason = _validate_rewrite_length(text, rewritten_text, max_growth=1.15)
-        print(f"[/rewrite] Length validation: {length_reason}")
+        print(f"[/rewrite] Pass 2 length validation: {length_reason}")
 
+        # ── Pass 3a: residual dictionary cleanup ───────────────────────────
         post_flagged = extract_flagged_phrases(rewritten_text)
-        post_count   = len(post_flagged['masculine']) + len(post_flagged['feminine'])
-        
+        post_plain   = _plain_flagged_words(post_flagged)
+        post_count   = len(post_plain['masculine']) + len(post_plain['feminine'])
+
         cleanup_applied = False
         if post_count > 0 or not is_length_valid:
-            print(f"[/rewrite] Residual flagged words: {post_count} | Length valid: {is_length_valid}")
-            print(f"[/rewrite] Running targeted cleanup...")
-            
-            rewritten_text, cleanup_changes, cleanup_applied = apply_residual_cleanup(
-                rewritten_text, 
-                text,
-                max_iterations=3
-            )
-            
-            post_flagged = extract_flagged_phrases(rewritten_text)
-            post_count   = len(post_flagged['masculine']) + len(post_flagged['feminine'])
-            is_length_valid, length_reason = _validate_rewrite_length(text, rewritten_text, max_growth=1.20)
-            print(f"[/rewrite] After cleanup: {post_count} flagged words remain | {length_reason}")
+            print(f"[/rewrite] Pass 3a: {post_count} residual flagged words | length valid: {is_length_valid}")
 
+            rewritten_text, cleanup_changes, cleanup_applied = apply_residual_cleanup(
+                rewritten_text,
+                text,
+                max_iterations=3,
+            )
+
+            post_flagged = extract_flagged_phrases(rewritten_text)
+            post_plain   = _plain_flagged_words(post_flagged)
+            post_count   = len(post_plain['masculine']) + len(post_plain['feminine'])
+            is_length_valid, length_reason = _validate_rewrite_length(text, rewritten_text, max_growth=1.20)
+            print(f"[/rewrite] After Pass 3a: {post_count} flagged words remain | {length_reason}")
+
+        # ── Pass 3b: targeted LLM micro-rewrite (only if words still remain) ──
+        if post_count > 0:
+            print(f"[/rewrite] Pass 3b: {post_count} words survived cleanup — running targeted LLM micro-rewrite")
+            rewritten_text = _run_targeted_llm_cleanup(
+                rewritten_text,
+                post_flagged,
+                original_text_len,
+            )
+
+            post_flagged = extract_flagged_phrases(rewritten_text)
+            post_plain   = _plain_flagged_words(post_flagged)
+            post_count   = len(post_plain['masculine']) + len(post_plain['feminine'])
+            is_length_valid, length_reason = _validate_rewrite_length(text, rewritten_text, max_growth=1.20)
+            print(f"[/rewrite] After Pass 3b: {post_count} flagged words remain | {length_reason}")
+
+        # ── Re-classify the rewritten text ────────────────────────────────
         embeddings = get_embeddings(rewritten_text, max_length=config['max_length'])
 
         predicted_class_idx = rf_model.predict([embeddings])[0]
@@ -1203,22 +1365,21 @@ def rewrite_gender_neutral():
             mapped_class_name = CLASS_NAME_MAPPING.get(raw_class_name, raw_class_name)
             confidence_scores[mapped_class_name] = float(probabilities[i])
 
-        masculine_count = len(post_flagged['masculine'])
-        feminine_count  = len(post_flagged['feminine'])
+        masculine_count = len(post_plain['masculine'])
+        feminine_count  = len(post_plain['feminine'])
 
         if masculine_count == 0 and feminine_count == 0:
             predicted_class = 'Neutral'
             raw_neutral = confidence_scores.get('Neutral', 0)
-            raw_male = confidence_scores.get('Male', 0)
-            raw_female = confidence_scores.get('Female', 0)
-            total = raw_neutral + raw_male + raw_female 
+            raw_male    = confidence_scores.get('Male', 0)
+            raw_female  = confidence_scores.get('Female', 0)
             total_biased = raw_male + raw_female
-            neutral = raw_neutral + (total_biased * 0.5)
+            neutral  = raw_neutral + (total_biased * 0.5)
             remaining = 1.0 - neutral
 
             if total_biased > 0:
-                confidence_scores['Male']    = round(remaining * (raw_male / total_biased), 4)
-                confidence_scores['Female']  = round(remaining * (raw_female / total_biased), 4)
+                confidence_scores['Male']   = round(remaining * (raw_male   / total_biased), 4)
+                confidence_scores['Female'] = round(remaining * (raw_female / total_biased), 4)
             else:
                 confidence_scores['Male']   = 0.0
                 confidence_scores['Female'] = 0.0

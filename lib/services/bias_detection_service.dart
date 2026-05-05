@@ -1,10 +1,36 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+/// Represents a single gender-coded word returned by the backend,
+/// including its source citation from the data dictionary.
+class FlaggedWord {
+  final String word;
+  final String source;
+
+  const FlaggedWord({
+    required this.word,
+    required this.source,
+  });
+
+  factory FlaggedWord.fromJson(Map<String, dynamic> json) {
+    return FlaggedWord(
+      word: json['word']?.toString() ?? '',
+      source: json['source']?.toString() ?? '',
+    );
+  }
+
+  @override
+  String toString() => word;
+}
+
 class BiasDetectionResult {
   final String detectedClass;
   final Map<String, double> confidenceScores;
-  final Map<String, List<String>> flaggedPhrases;
+
+  /// Each key ('masculine' | 'feminine') maps to a list of FlaggedWord objects,
+  /// each carrying the word string and its source citation.
+  final Map<String, List<FlaggedWord>> flaggedPhrases;
+
   final String accuracyNote;
   final String? modelVersion;
 
@@ -17,21 +43,46 @@ class BiasDetectionResult {
   });
 
   factory BiasDetectionResult.fromJson(Map<String, dynamic> json) {
+    final rawPhrases = json['flagged_phrases'] as Map<String, dynamic>? ?? {};
+
+    final flaggedPhrases = <String, List<FlaggedWord>>{};
+
+    for (final entry in rawPhrases.entries) {
+      final key = entry.key.toString();
+      final value = entry.value;
+
+      if (value is List) {
+        flaggedPhrases[key] = value.map((item) {
+          // New enriched format: {"word": "...", "source": "..."}
+          if (item is Map<String, dynamic>) {
+            return FlaggedWord.fromJson(item);
+          }
+          // Fallback: plain string (old format safety net)
+          return FlaggedWord(word: item.toString(), source: '');
+        }).toList();
+      } else {
+        flaggedPhrases[key] = [];
+      }
+    }
+
     return BiasDetectionResult(
       detectedClass: json['detected_class'] ?? 'unknown',
       confidenceScores: Map<String, double>.from(
-        (json['confidence_scores'] as Map).map(
+        (json['confidence_scores'] as Map? ?? {}).map(
           (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
         ),
       ),
-      flaggedPhrases: Map<String, List<String>>.from(
-        (json['flagged_phrases'] as Map).map(
-          (k, v) => MapEntry(k.toString(), List<String>.from(v)),
-        ),
-      ),
+      flaggedPhrases: flaggedPhrases,
       accuracyNote: json['accuracy_note'] ?? '',
       modelVersion: json['model_version'],
     );
+  }
+
+  /// Convenience: returns plain word strings for a given gender key.
+  /// Use this wherever only the word text is needed (e.g. highlight matching,
+  /// suggestion fetching, rewrite diff logic).
+  List<String> wordStrings(String key) {
+    return flaggedPhrases[key]?.map((fw) => fw.word).toList() ?? [];
   }
 }
 
@@ -58,6 +109,7 @@ class GenderNeutralSuggestion {
 class BiasDetectionService {
   static const String baseUrl = 'http://localhost:5000';
   static const Duration timeout = Duration(seconds: 30);
+
   static Future<BiasDetectionResult> detectBias(String text) async {
     try {
       final response = await http
@@ -104,11 +156,9 @@ class BiasDetectionService {
     }
   }
 
-  
   /// [term] - The biased word to replace
   /// [biasType] - Either "masculine" or "feminine"
   /// [context] - The sentence or surrounding text containing the term (optional)
-
   static Future<GenderNeutralSuggestion> getContextAwareSuggestion(
     String term,
     String biasType, {
@@ -141,7 +191,6 @@ class BiasDetectionService {
   }
 
   /// [text] - The full job advertisement text to rewrite
-  
   static Future<Map<String, dynamic>> rewriteJobAdToNeutral(String text) async {
     try {
       final response = await http
