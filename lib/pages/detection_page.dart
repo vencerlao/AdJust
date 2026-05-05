@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:adjust_app/widgets/custom_scrollbar.dart';
-import 'package:adjust_app/widgets/word_suggestions.dart';
 import 'package:adjust_app/services/bias_detection_service.dart';
+import 'package:adjust_app/constants/source_urls.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
 
 const double _kFontSize = 16.0;
@@ -23,20 +24,15 @@ class DetectionPage extends StatefulWidget {
 class _DetectionPageState extends State<DetectionPage> {
   late TextEditingController _textController;
   BiasDetectionResult? _result;
-  BiasDetectionResult? _originalResult; 
+  BiasDetectionResult? _originalResult;
   bool _isLoading = false;
   bool _isRewriting = false;
   String? _error;
   int _hoveredSectionIndex = -1;
 
-  Map<String, String> _suggestions = {};
-  Map<String, bool> _suggestionLoading = {};
-  Map<String, String?> _suggestionErrors = {};
-  String? _hoveredWord;
+
 
   Map<String, String> _rewrittenWords = {};
-
-  late final ValueNotifier<int> _suggestionUpdateNotifier = ValueNotifier(0);
 
   @override
   void initState() {
@@ -47,7 +43,6 @@ class _DetectionPageState extends State<DetectionPage> {
   @override
   void dispose() {
     _textController.dispose();
-    _suggestionUpdateNotifier.dispose();
     super.dispose();
   }
 
@@ -86,10 +81,6 @@ class _DetectionPageState extends State<DetectionPage> {
     setState(() {
       _isLoading = true;
       _error = null;
-      _suggestions.clear();
-      _suggestionLoading.clear();
-      _suggestionErrors.clear();
-      _hoveredWord = null;
       _rewrittenWords = {};
     });
 
@@ -97,7 +88,7 @@ class _DetectionPageState extends State<DetectionPage> {
       final result = await BiasDetectionService.detectBias(text);
       setState(() {
         _result = result;
-        _originalResult = result; 
+        _originalResult = result;
         _isLoading = false;
       });
     } catch (e) {
@@ -121,10 +112,6 @@ class _DetectionPageState extends State<DetectionPage> {
     setState(() {
       _isRewriting = true;
       _error = null;
-      _suggestions.clear();
-      _suggestionLoading.clear();
-      _suggestionErrors.clear();
-      _hoveredWord = null;
       _rewrittenWords = {};
     });
 
@@ -135,6 +122,7 @@ class _DetectionPageState extends State<DetectionPage> {
       final detectionResult =
           rewriteResponse['detection_result'] as BiasDetectionResult;
 
+      // Use wordStrings() helper for plain string lists
       final masculine = _getWords('masculine');
       final feminine = _getWords('feminine');
       final genderCodedWords = <String>{
@@ -143,7 +131,7 @@ class _DetectionPageState extends State<DetectionPage> {
       };
 
       final wordPattern = RegExp(r'\b[\w]+(?:-[\w]+)*\b');
-      
+
       final originalWordMatches =
           wordPattern.allMatches(text.toLowerCase()).map((m) => m.group(0)!).toSet();
       final rewrittenWordMatches =
@@ -198,14 +186,19 @@ class _DetectionPageState extends State<DetectionPage> {
     }
   }
 
+  /// Returns plain word strings for a given key ('masculine' | 'feminine').
+  /// Pulls from the original pre-rewrite result when [useOriginal] is true.
   List<String> _getWords(String key, {bool useOriginal = false}) {
     final result = useOriginal ? _originalResult : _result;
     if (result == null) return [];
-    final raw = result.flaggedPhrases[key];
-    if (raw == null) return [];
-    if (raw is List<String>) return raw;
-    if (raw is List) return raw.map((e) => e.toString()).toList();
-    return [];
+    return result.wordStrings(key);
+  }
+
+  /// Returns the [FlaggedWord] list for a given key, preserving source info.
+  List<FlaggedWord> _getFlaggedWords(String key, {bool useOriginal = false}) {
+    final result = useOriginal ? _originalResult : _result;
+    if (result == null) return [];
+    return result.flaggedPhrases[key] ?? [];
   }
 
   String _getBiasType(String word) {
@@ -253,89 +246,7 @@ class _DetectionPageState extends State<DetectionPage> {
     return sentence;
   }
 
-  Future<void> _fetchSuggestion(String term) async {
-    if (_suggestions.containsKey(term)) {
-      _suggestionUpdateNotifier.value++;
-      return;
-    }
 
-    setState(() {
-      _suggestionLoading[term] = true;
-      _suggestionErrors[term] = null;
-    });
-
-    try {
-      final biasType = _getBiasType(term);
-      final context = _extractContext(term);
-
-      final suggestion = await BiasDetectionService.getContextAwareSuggestion(
-        term,
-        biasType,
-        context: context,
-      );
-
-      setState(() {
-        _suggestions[term] = suggestion.suggestion;
-        _suggestionLoading[term] = false;
-        _suggestionUpdateNotifier.value++;
-      });
-    } catch (e) {
-      setState(() {
-        _suggestionLoading[term] = false;
-        _suggestionErrors[term] = 'No suggestion available';
-        _suggestionUpdateNotifier.value++;
-      });
-    }
-  }
-
-  void _acceptSuggestion(String originalWord, String suggestion) {
-    final updatedText = _textController.text.replaceAll(
-      RegExp(r'\b' + RegExp.escape(originalWord) + r'\b'),
-      suggestion,
-    );
-
-    setState(() {
-      _textController.value = TextEditingValue(text: updatedText);
-      _hoveredWord = null;
-      _suggestions.clear();
-      _suggestionLoading.clear();
-      _suggestionErrors.clear();
-      _rewrittenWords = {};
-      _result = null;
-      _originalResult = null;
-    });
-  }
-
-  void _dismissPopover() {
-    setState(() => _hoveredWord = null);
-  }
-
-  void _showSuggestionPopover(String word) {
-    showDialog(
-      context: context,
-      barrierColor: Colors.transparent,
-      builder: (context) => ValueListenableBuilder<int>(
-        valueListenable: _suggestionUpdateNotifier,
-        builder: (context, _, __) {
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            child: SuggestionPopover(
-              term: word,
-              suggestion: _suggestions[word],
-              isLoading: _suggestionLoading[word] ?? false,
-              error: _suggestionErrors[word],
-              onAccept: () {
-                Navigator.of(context).pop();
-                _acceptSuggestion(word, _suggestions[word] ?? '');
-              },
-              onDismiss: () => Navigator.of(context).pop(),
-            ),
-          );
-        },
-      ),
-    );
-  }
 
   TextStyle get _sharedTextStyle => GoogleFonts.poppins(
         fontSize: _kFontSize,
@@ -376,7 +287,6 @@ class _DetectionPageState extends State<DetectionPage> {
         matches.add(MapEntry(match.start, word));
       }
     }
-
 
     final coveredStarts = matches.map((e) => e.key).toSet();
     for (final word in _rewrittenWords.keys) {
@@ -803,7 +713,7 @@ class _DetectionPageState extends State<DetectionPage> {
                       Expanded(
                         child: _CodedWordList(
                           title: 'Masculine Coded Words',
-                          words: _getWords('masculine'),
+                          flaggedWords: _getFlaggedWords('masculine'),
                           bulletColor: const Color(0xFF8E7AB5),
                         ),
                       ),
@@ -811,7 +721,7 @@ class _DetectionPageState extends State<DetectionPage> {
                       Expanded(
                         child: _CodedWordList(
                           title: 'Feminine Coded Words',
-                          words: _getWords('feminine'),
+                          flaggedWords: _getFlaggedWords('feminine'),
                           bulletColor: const Color(0xFFB188B6),
                         ),
                       ),
@@ -882,10 +792,6 @@ class _DetectionPageState extends State<DetectionPage> {
         setState(() {
           _result = null;
           _originalResult = null;
-          _suggestions.clear();
-          _suggestionLoading.clear();
-          _suggestionErrors.clear();
-          _hoveredWord = null;
           _rewrittenWords = {};
         });
       },
@@ -954,7 +860,7 @@ class _DetectionPageState extends State<DetectionPage> {
           }),
           foregroundColor: MaterialStateProperty.resolveWith<Color>((states) {
             if (states.contains(MaterialState.disabled)) {
-              return const Color(0xFF280647).withOpacity(0.4); 
+              return const Color(0xFF280647).withOpacity(0.4);
             }
             return states.contains(MaterialState.hovered)
                 ? const Color(0xFFD4B5E8)
@@ -966,7 +872,7 @@ class _DetectionPageState extends State<DetectionPage> {
                 : (states.contains(MaterialState.hovered)
                     ? const Color(0xFFD4B5E8)
                     : const Color(0xFF280647));
-            
+
             return RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(30),
               side: BorderSide(
@@ -994,6 +900,10 @@ class _DetectionPageState extends State<DetectionPage> {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// _PercentageIndicator — unchanged
+// ---------------------------------------------------------------------------
 
 class _PercentageIndicator extends StatelessWidget {
   final String label;
@@ -1040,14 +950,18 @@ class _PercentageIndicator extends StatelessWidget {
 }
 
 
+// ---------------------------------------------------------------------------
+// _CodedWordList — updated to show source chips with clickable tooltip links
+// ---------------------------------------------------------------------------
+
 class _CodedWordList extends StatelessWidget {
   final String title;
-  final List<String> words;
+  final List<FlaggedWord> flaggedWords;
   final Color bulletColor;
 
   const _CodedWordList({
     required this.title,
-    required this.words,
+    required this.flaggedWords,
     required this.bulletColor,
   });
 
@@ -1083,7 +997,7 @@ class _CodedWordList extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: words.isEmpty
+            child: flaggedWords.isEmpty
                 ? Center(
                     child: Text(
                       'No words detected',
@@ -1097,13 +1011,18 @@ class _CodedWordList extends StatelessWidget {
                     child: ListView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      itemCount: words.length,
+                      itemCount: flaggedWords.length,
                       itemBuilder: (context, index) {
+                        final fw = flaggedWords[index];
+                        final sources = splitSources(fw.source);
+                        final hasLinks = sources.any((s) => s.url != null);
+
                         return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.fromLTRB(0, 4, 20, 4),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
+                              // Bullet dot
                               Container(
                                 width: 6,
                                 height: 6,
@@ -1113,16 +1032,25 @@ class _CodedWordList extends StatelessWidget {
                                   shape: BoxShape.circle,
                                 ),
                               ),
+
+                              // Word text
                               Expanded(
                                 child: Text(
-                                  words[index],
+                                  fw.word,
                                   style: GoogleFonts.poppins(
-                                    fontSize: 12,
+                                    fontSize: 14,
                                     color: const Color(0xFF333333),
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ),
+
+                              // Source chip — only shown when source is present
+                              if (fw.source.isNotEmpty)
+                                _SourceChip(
+                                  sources: sources,
+                                  chipColor: bulletColor,
+                                ),
                             ],
                           ),
                         );
@@ -1130,6 +1058,242 @@ class _CodedWordList extends StatelessWidget {
                     ),
                   ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// _SourceChip — pill that shows source count; tooltip lists clickable links
+// ---------------------------------------------------------------------------
+
+class _SourceChip extends StatefulWidget {
+  final List<({String label, String? url})> sources;
+  final Color chipColor;
+
+  const _SourceChip({
+    required this.sources,
+    required this.chipColor,
+  });
+
+  @override
+  State<_SourceChip> createState() => _SourceChipState();
+}
+
+class _SourceChipState extends State<_SourceChip> {
+  final _layerLink = LayerLink();
+  OverlayEntry? _overlayEntry;
+  bool _isOverlayVisible = false;
+
+  void _showOverlay(BuildContext context) {
+    if (_isOverlayVisible) {
+      _removeOverlay();
+      return;
+    }
+
+    final overlay = Overlay.of(context);
+    _overlayEntry = OverlayEntry(
+      builder: (context) => GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: _removeOverlay,
+        child: Stack(
+          children: [
+            Positioned.fill(child: Container(color: Colors.transparent)),
+            CompositedTransformFollower(
+              link: _layerLink,
+              showWhenUnlinked: false,
+              offset: const Offset(0, -8),
+              targetAnchor: Alignment.topRight,
+              followerAnchor: Alignment.bottomRight,
+              child: Material(
+                color: Colors.transparent,
+                child: _SourceTooltipCard(
+                  sources: widget.sources,
+                  chipColor: widget.chipColor,
+                  onClose: _removeOverlay,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    overlay.insert(_overlayEntry!);
+    setState(() => _isOverlayVisible = true);
+  }
+
+  void _removeOverlay() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+    if (mounted) setState(() => _isOverlayVisible = false);
+  }
+
+  @override
+  void dispose() {
+    _removeOverlay();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final count = widget.sources.length;
+    final label = count == 1 ? '1 source' : '$count sources';
+
+    // Slightly desaturated fill from the bullet color
+    final chipBg = widget.chipColor.withOpacity(0.12);
+    final chipText = widget.chipColor;
+
+    return CompositedTransformTarget(
+      link: _layerLink,
+      child: GestureDetector(
+        onTap: () => _showOverlay(context),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: _isOverlayVisible ? widget.chipColor.withOpacity(0.2) : chipBg,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(
+              color: widget.chipColor.withOpacity(0.35),
+              width: 0.8,
+            ),
+          ),
+          child: Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: chipText,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// _SourceTooltipCard — the floating card with clickable source links
+// ---------------------------------------------------------------------------
+
+class _SourceTooltipCard extends StatelessWidget {
+  final List<({String label, String? url})> sources;
+  final Color chipColor;
+  final VoidCallback onClose;
+
+  const _SourceTooltipCard({
+    required this.sources,
+    required this.chipColor,
+    required this.onClose,
+  });
+
+  Future<void> _launchUrl(String url) async {
+    try {
+      await launchUrl(Uri.parse(url));
+    } catch (e) {
+      // Silently fail if URL cannot be launched
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 270,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: const Color(0xFFD4B5E8),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.10),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Sources',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFFA984AE),
+                  letterSpacing: 0.4,
+                ),
+              ),
+              GestureDetector(
+                onTap: onClose,
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 14,
+                  color: Colors.grey.shade400,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
+          // Source rows
+          ...sources.map((s) {
+            final hasUrl = s.url != null;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: GestureDetector(
+                onTap: hasUrl ? () => _launchUrl(s.url!) : null,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Link / no-link icon
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1, right: 5),
+                      child: Icon(
+                        hasUrl ? Icons.open_in_new_rounded : Icons.info_outline_rounded,
+                        size: 11,
+                        color: hasUrl
+                            ? chipColor
+                            : Colors.grey.shade400,
+                      ),
+                    ),
+
+                    // Source label
+                    Expanded(
+                      child: Text(
+                        s.label,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: hasUrl
+                              ? chipColor
+                              : Colors.grey.shade500,
+                          decoration: hasUrl
+                              ? TextDecoration.underline
+                              : TextDecoration.none,
+                          decorationColor: chipColor,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
         ],
       ),
     );
