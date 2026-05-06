@@ -122,7 +122,6 @@ class _DetectionPageState extends State<DetectionPage> {
       final detectionResult =
           rewriteResponse['detection_result'] as BiasDetectionResult;
 
-      // Use wordStrings() helper for plain string lists
       final masculine = _getWords('masculine');
       final feminine = _getWords('feminine');
       final genderCodedWords = <String>{
@@ -186,15 +185,12 @@ class _DetectionPageState extends State<DetectionPage> {
     }
   }
 
-  /// Returns plain word strings for a given key ('masculine' | 'feminine').
-  /// Pulls from the original pre-rewrite result when [useOriginal] is true.
   List<String> _getWords(String key, {bool useOriginal = false}) {
     final result = useOriginal ? _originalResult : _result;
     if (result == null) return [];
     return result.wordStrings(key);
   }
 
-  /// Returns the [FlaggedWord] list for a given key, preserving source info.
   List<FlaggedWord> _getFlaggedWords(String key, {bool useOriginal = false}) {
     final result = useOriginal ? _originalResult : _result;
     if (result == null) return [];
@@ -900,11 +896,6 @@ class _DetectionPageState extends State<DetectionPage> {
   }
 }
 
-
-// ---------------------------------------------------------------------------
-// _PercentageIndicator — unchanged
-// ---------------------------------------------------------------------------
-
 class _PercentageIndicator extends StatelessWidget {
   final String label;
   final double percentage;
@@ -948,11 +939,6 @@ class _PercentageIndicator extends StatelessWidget {
     );
   }
 }
-
-
-// ---------------------------------------------------------------------------
-// _CodedWordList — updated to show source chips with clickable tooltip links
-// ---------------------------------------------------------------------------
 
 class _CodedWordList extends StatelessWidget {
   final String title;
@@ -1022,7 +1008,6 @@ class _CodedWordList extends StatelessWidget {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              // Bullet dot
                               Container(
                                 width: 6,
                                 height: 6,
@@ -1033,7 +1018,6 @@ class _CodedWordList extends StatelessWidget {
                                 ),
                               ),
 
-                              // Word text
                               Expanded(
                                 child: Text(
                                   fw.word,
@@ -1045,7 +1029,6 @@ class _CodedWordList extends StatelessWidget {
                                 ),
                               ),
 
-                              // Source chip — only shown when source is present
                               if (fw.source.isNotEmpty)
                                 _SourceChip(
                                   sources: sources,
@@ -1064,10 +1047,6 @@ class _CodedWordList extends StatelessWidget {
   }
 }
 
-
-// ---------------------------------------------------------------------------
-// _SourceChip — pill that shows source count; tooltip lists clickable links
-// ---------------------------------------------------------------------------
 
 class _SourceChip extends StatefulWidget {
   final List<({String label, String? url})> sources;
@@ -1142,7 +1121,6 @@ class _SourceChipState extends State<_SourceChip> {
     final count = widget.sources.length;
     final label = count == 1 ? '1 source' : '$count sources';
 
-    // Slightly desaturated fill from the bullet color
     final chipBg = widget.chipColor.withOpacity(0.12);
     final chipText = widget.chipColor;
 
@@ -1176,10 +1154,6 @@ class _SourceChipState extends State<_SourceChip> {
 }
 
 
-// ---------------------------------------------------------------------------
-// _SourceTooltipCard — the floating card with clickable source links
-// ---------------------------------------------------------------------------
-
 class _SourceTooltipCard extends StatelessWidget {
   final List<({String label, String? url})> sources;
   final Color chipColor;
@@ -1195,7 +1169,7 @@ class _SourceTooltipCard extends StatelessWidget {
     try {
       await launchUrl(Uri.parse(url));
     } catch (e) {
-      // Silently fail if URL cannot be launched
+      debugPrint('Could not launch URL: $e');
     }
   }
 
@@ -1223,7 +1197,6 @@ class _SourceTooltipCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -1249,7 +1222,6 @@ class _SourceTooltipCard extends StatelessWidget {
 
           const SizedBox(height: 8),
 
-          // Source rows
           ...sources.map((s) {
             final hasUrl = s.url != null;
             return Padding(
@@ -1259,7 +1231,6 @@ class _SourceTooltipCard extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Link / no-link icon
                     Padding(
                       padding: const EdgeInsets.only(top: 1, right: 5),
                       child: Icon(
@@ -1271,7 +1242,6 @@ class _SourceTooltipCard extends StatelessWidget {
                       ),
                     ),
 
-                    // Source label
                     Expanded(
                       child: Text(
                         s.label,
