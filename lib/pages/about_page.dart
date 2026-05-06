@@ -304,21 +304,21 @@ class _TeamSection extends StatelessWidget {
       name: 'LAO, Vencer A.',
       role: 'Web Developer',
       description:
-          'Spearheads the system\’s web development framework and user interface, ensuring a seamless and intuitive user experience. Responsible for establishing the foundational data dictionary of gender-coded words, defining the linguistic parameters used for detection. Facilitated the technical implementation of the gender-neutral rewriting API, optimizing the integration pipeline to ensure real-time text transformations are both technically robust and inclusive.\n\n\n\n',
+          'Spearheads the system\’s web development framework and user interface, ensuring a seamless and intuitive user experience. Responsible for establishing the foundational data dictionary of gender-coded words, defining the linguistic parameters used for detection. Facilitated the integration of the gender-neutral rewriting API, optimizing the integration pipeline to ensure real-time text transformations are both technically robust and inclusive.',
       imagePath: 'assets/images/vencer.jpg',
     ),
     _MemberData(
       name: 'BARBACENA, Jenny B.',
       role: 'Data Analyst',
       description:
-          'Handles historical data collection, preprocessing, and temporal analysis of over 427,000 job advertisement entries. Responsible for conducting exploratory data analysis, performing Mann-Kendall trend analysis to identify patterns of gender bias across ten industries over a ten-year period, and developing the analytics dashboard of the web application.\n\n\n\n\n\n\n\n',
+          'Handles historical data collection, preprocessing, and temporal analysis of over 427,000 job advertisement entries. Responsible for conducting exploratory data analysis, performing Mann-Kendall trend analysis to identify patterns of gender bias across ten industries over a ten-year period, and developing the analytics dashboard of the web application.\n\n\n',
       imagePath: 'assets/images/jenny.jpg',
     ),
     _MemberData(
       name: 'MIRANDA, Maria Lourdes S.',
       role: 'Machine Learning &\n Data Engineer',
       description:
-          'Responsible for the end-to-end development of the system, including the design and implementation of web scraping pipelines to collect and construct a dataset of job advertisements. Handled data preprocessing, cleaning, and structuring of raw scraped data for model training. Developed and trained the machine learning model for gender bias detection, including experimentation, iteration, and performance optimization. Also contributed to the implementation of the model integration pipeline used for classification and prediction within the system.',
+          'Led the end-to-end system development, including web scraping pipeline design and implementation for job advertisement data collection. Performed data preprocessing and dataset construction for model training. Developed, trained, and iteratively optimized the gender bias detection model, and implemented its integration into the system for classification and prediction.',
       imagePath: 'assets/images/lourdes.jpg',
     ),
   ];

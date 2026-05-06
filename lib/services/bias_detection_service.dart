@@ -1,8 +1,6 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-/// Represents a single gender-coded word returned by the backend,
-/// including its source citation from the data dictionary.
 class FlaggedWord {
   final String word;
   final String source;
@@ -27,8 +25,6 @@ class BiasDetectionResult {
   final String detectedClass;
   final Map<String, double> confidenceScores;
 
-  /// Each key ('masculine' | 'feminine') maps to a list of FlaggedWord objects,
-  /// each carrying the word string and its source citation.
   final Map<String, List<FlaggedWord>> flaggedPhrases;
 
   final String accuracyNote;
@@ -53,11 +49,9 @@ class BiasDetectionResult {
 
       if (value is List) {
         flaggedPhrases[key] = value.map((item) {
-          // New enriched format: {"word": "...", "source": "..."}
           if (item is Map<String, dynamic>) {
             return FlaggedWord.fromJson(item);
           }
-          // Fallback: plain string (old format safety net)
           return FlaggedWord(word: item.toString(), source: '');
         }).toList();
       } else {
@@ -78,9 +72,6 @@ class BiasDetectionResult {
     );
   }
 
-  /// Convenience: returns plain word strings for a given gender key.
-  /// Use this wherever only the word text is needed (e.g. highlight matching,
-  /// suggestion fetching, rewrite diff logic).
   List<String> wordStrings(String key) {
     return flaggedPhrases[key]?.map((fw) => fw.word).toList() ?? [];
   }
@@ -156,9 +147,6 @@ class BiasDetectionService {
     }
   }
 
-  /// [term] - The biased word to replace
-  /// [biasType] - Either "masculine" or "feminine"
-  /// [context] - The sentence or surrounding text containing the term (optional)
   static Future<GenderNeutralSuggestion> getContextAwareSuggestion(
     String term,
     String biasType, {
@@ -190,7 +178,6 @@ class BiasDetectionService {
     }
   }
 
-  /// [text] - The full job advertisement text to rewrite
   static Future<Map<String, dynamic>> rewriteJobAdToNeutral(String text) async {
     try {
       final response = await http
