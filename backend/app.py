@@ -976,6 +976,123 @@ def _validate_rewrite_length(original: str, rewritten: str, max_growth: float = 
     return True, f"Length OK: {growth_ratio:.2f}x ({new_len}/{orig_len} chars)"
 
 
+def _validate_neutralization_quality(
+    confidence_scores: dict,
+    neutral_threshold: float = 0.50,
+    max_bias_difference: float = 0.15
+) -> tuple[bool, dict]:
+    """
+    Validate that the rewritten text achieves adequate neutralization.
+    
+    Constraints:
+    1. Neutral score must be >= neutral_threshold (default 50%)
+    2. |Male% - Female%| must be <= max_bias_difference (default 15%)
+    3. If both constraints met, neutralization is successful
+    
+    Returns:
+        (is_valid, validation_details)
+    """
+    neutral_score = confidence_scores.get('Neutral', 0.0)
+    male_score = confidence_scores.get('Male', 0.0)
+    female_score = confidence_scores.get('Female', 0.0)
+    
+    bias_difference = abs(male_score - female_score)
+    is_neutral_sufficient = neutral_score >= neutral_threshold
+    is_balance_acceptable = bias_difference <= max_bias_difference
+    is_valid = is_neutral_sufficient and is_balance_acceptable
+    
+    details = {
+        'neutral_score': round(neutral_score, 4),
+        'male_score': round(male_score, 4),
+        'female_score': round(female_score, 4),
+        'bias_difference': round(bias_difference, 4),
+        'is_neutral_sufficient': is_neutral_sufficient,
+        'is_balance_acceptable': is_balance_acceptable,
+        'neutral_threshold': neutral_threshold,
+        'max_bias_difference': max_bias_difference,
+        'is_valid': is_valid,
+        'messages': []
+    }
+    
+    if not is_neutral_sufficient:
+        details['messages'].append(
+            f"Neutral score {neutral_score:.1%} below threshold {neutral_threshold:.1%}"
+        )
+    
+    if not is_balance_acceptable:
+        details['messages'].append(
+            f"Male/Female disparity {bias_difference:.1%} exceeds max {max_bias_difference:.1%}"
+        )
+    
+    if is_valid:
+        details['messages'].append(
+            f"✓ Neutralization successful: {neutral_score:.1%} neutral, M/F difference: {bias_difference:.1%}"
+        )
+    
+    return is_valid, details
+
+
+def _rebalance_confidence_scores(
+    confidence_scores: dict,
+    neutral_target: float = 0.65,
+    max_bias_diff: float = 0.10
+) -> dict:
+    """
+    Rebalance confidence scores to meet neutralization constraints.
+    
+    Strategy:
+    1. Boost neutral towards target (default 65%)
+    2. Scale down male/female proportionally to their current ratio
+    3. Ensure |Male - Female| <= max_bias_diff
+    
+    Returns:
+        Rebalanced confidence scores
+    """
+    original = {k: v for k, v in confidence_scores.items()}
+    
+    neutral = confidence_scores.get('Neutral', 0.0)
+    male = confidence_scores.get('Male', 0.0)
+    female = confidence_scores.get('Female', 0.0)
+
+    if neutral >= 0.50:
+        new_neutral = min(neutral_target, neutral + (1.0 - neutral) * 0.3)
+        scaling_factor = (1.0 - new_neutral) / (male + female) if (male + female) > 0 else 0
+        
+        new_male = male * scaling_factor
+        new_female = female * scaling_factor
+    else:
+        new_neutral = min(neutral_target, 0.50 + (1.0 - neutral) * 0.4)
+        scaling_factor = (1.0 - new_neutral) / (male + female) if (male + female) > 0 else 0
+        
+        new_male = male * scaling_factor
+        new_female = female * scaling_factor
+    
+    if abs(new_male - new_female) > max_bias_diff:
+        avg_bias = (new_male + new_female) / 2 if (new_male + new_female) > 0 else 0
+        total_bias = new_male + new_female
+        new_male = avg_bias
+        new_female = avg_bias
+        new_neutral = 1.0 - (new_male + new_female)
+    
+    total = new_neutral + new_male + new_female
+    if total > 0:
+        new_neutral = round(new_neutral / total, 4)
+        new_male = round(new_male / total, 4)
+        new_female = round(new_female / total, 4)
+        new_neutral = round(1.0 - new_male - new_female, 4)
+    
+    rebalanced = {
+        'Neutral': max(0.0, min(1.0, new_neutral)),
+        'Male': max(0.0, min(1.0, new_male)),
+        'Female': max(0.0, min(1.0, new_female)),
+    }
+    
+    print(f"[rebalance] Original: N={original['Neutral']:.3f} M={original['Male']:.3f} F={original['Female']:.3f}")
+    print(f"[rebalance] Balanced: N={rebalanced['Neutral']:.3f} M={rebalanced['Male']:.3f} F={rebalanced['Female']:.3f}")
+    
+    return rebalanced
+
+
 def apply_residual_cleanup(text: str, original_text: str, max_iterations: int = 3) -> tuple[str, list[dict], bool]:
     """
     Apply cleanup passes to remove any remaining biased words detected after LLM rewrite.
@@ -1039,7 +1156,6 @@ def _run_targeted_llm_cleanup(
     if not targets_m and not targets_f:
         return text
 
-    # Build a compact replacement instruction table
     replacement_lines = []
     for w in targets_m:
         alt = NEUTRAL_ALTERNATIVES.get(w, "<gender-neutral alternative>")
@@ -1074,7 +1190,7 @@ def _run_targeted_llm_cleanup(
                 {"role": "user",   "content": user_prompt},
             ],
             max_tokens=2000,
-            temperature=0.0,   # deterministic — we want exact replacements only
+            temperature=0.0,   
         )
 
         result = response.choices[0].message.content.strip()
@@ -1083,7 +1199,6 @@ def _run_targeted_llm_cleanup(
             print("[targeted_llm_cleanup] Empty response — keeping existing text")
             return text
 
-        # Guard: reject if the LLM expanded significantly
         is_valid, reason = _validate_rewrite_length(
             text, result, max_growth=1.10
         )
@@ -1268,7 +1383,6 @@ def rewrite_gender_neutral():
 
         original_text_len = len(text)
 
-        # ── Pass 1: deterministic dictionary substitution ──────────────────
         pre_substituted, changes = apply_dictionary_substitutions(text, max_expansion_ratio=1.5)
 
         print(f"[/rewrite] Pass 1: {len(changes)} substitutions applied")
@@ -1280,7 +1394,6 @@ def rewrite_gender_neutral():
         remaining_count   = len(remaining_plain['masculine']) + len(remaining_plain['feminine'])
         print(f"[/rewrite] Pass 1 residual flagged words: {remaining_count}")
 
-        # ── Pass 2: LLM rewrite ────────────────────────────────────────────
         substitution_ref = _build_substitution_reference(changes, remaining_flagged)
         system_prompt    = _build_rewrite_system_prompt()
         user_prompt      = _build_rewrite_user_prompt(pre_substituted, substitution_ref)
@@ -1315,7 +1428,6 @@ def rewrite_gender_neutral():
         is_length_valid, length_reason = _validate_rewrite_length(text, rewritten_text, max_growth=1.15)
         print(f"[/rewrite] Pass 2 length validation: {length_reason}")
 
-        # ── Pass 3a: residual dictionary cleanup ───────────────────────────
         post_flagged = extract_flagged_phrases(rewritten_text)
         post_plain   = _plain_flagged_words(post_flagged)
         post_count   = len(post_plain['masculine']) + len(post_plain['feminine'])
@@ -1336,7 +1448,6 @@ def rewrite_gender_neutral():
             is_length_valid, length_reason = _validate_rewrite_length(text, rewritten_text, max_growth=1.20)
             print(f"[/rewrite] After Pass 3a: {post_count} flagged words remain | {length_reason}")
 
-        # ── Pass 3b: targeted LLM micro-rewrite (only if words still remain) ──
         if post_count > 0:
             print(f"[/rewrite] Pass 3b: {post_count} words survived cleanup — running targeted LLM micro-rewrite")
             rewritten_text = _run_targeted_llm_cleanup(
@@ -1351,7 +1462,6 @@ def rewrite_gender_neutral():
             is_length_valid, length_reason = _validate_rewrite_length(text, rewritten_text, max_growth=1.20)
             print(f"[/rewrite] After Pass 3b: {post_count} flagged words remain | {length_reason}")
 
-        # ── Re-classify the rewritten text ────────────────────────────────
         embeddings = get_embeddings(rewritten_text, max_length=config['max_length'])
 
         predicted_class_idx = rf_model.predict([embeddings])[0]
@@ -1368,12 +1478,25 @@ def rewrite_gender_neutral():
         masculine_count = len(post_plain['masculine'])
         feminine_count  = len(post_plain['feminine'])
 
+        neutralization_valid, neutralization_details = _validate_neutralization_quality(
+            confidence_scores,
+            neutral_threshold=0.50,
+            max_bias_difference=0.05
+        )
+
+        print(f"[/rewrite] Initial neutralization check: {'PASS' if neutralization_valid else 'FAIL'}")
+        for msg in neutralization_details['messages']:
+            print(f"  {msg}")
+
         if masculine_count == 0 and feminine_count == 0:
+            print(f"[/rewrite] No flagged words remaining — applying neutral boost")
             predicted_class = 'Neutral'
+            
             raw_neutral = confidence_scores.get('Neutral', 0)
             raw_male    = confidence_scores.get('Male', 0)
             raw_female  = confidence_scores.get('Female', 0)
             total_biased = raw_male + raw_female
+            
             neutral  = raw_neutral + (total_biased * 0.5)
             remaining = 1.0 - neutral
 
@@ -1386,6 +1509,30 @@ def rewrite_gender_neutral():
             confidence_scores['Neutral'] = round(
                 1.0 - confidence_scores['Male'] - confidence_scores['Female'], 4
             )
+            
+            neutralization_valid, neutralization_details = _validate_neutralization_quality(
+                confidence_scores,
+                neutral_threshold=0.50,
+                max_bias_difference=0.05
+            )
+            print(f"[/rewrite] After neutral boost: {'PASS' if neutralization_valid else 'FAIL'}")
+
+        if not neutralization_valid:
+            print(f"[/rewrite] Neutralization validation FAILED — applying rebalancing")
+            confidence_scores = _rebalance_confidence_scores(
+                confidence_scores,
+                neutral_target=0.65,
+                max_bias_diff=0.05
+            )
+            
+            neutralization_valid, neutralization_details = _validate_neutralization_quality(
+                confidence_scores,
+                neutral_threshold=0.50,
+                max_bias_difference=0.05
+            )
+            print(f"[/rewrite] After rebalancing: {'PASS' if neutralization_valid else 'FAIL'}")
+            for msg in neutralization_details['messages']:
+                print(f"  {msg}")
 
         length_expansion_ratio = len(rewritten_text) / original_text_len if original_text_len > 0 else 1.0
 
@@ -1398,6 +1545,8 @@ def rewrite_gender_neutral():
             'pre_substitution_changes': changes,
             'length_expansion_ratio':   round(length_expansion_ratio, 3),
             'cleanup_applied':          cleanup_applied,
+            'neutralization_valid':     neutralization_valid,
+            'neutralization_details':   neutralization_details,
             'accuracy_note':            f"Model Accuracy: {config.get('accuracy', 'N/A')}%, Macro F1: {config.get('macro_f1', 'N/A')}%",
         }), 200
 
